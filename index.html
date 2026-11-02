@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f2f2f7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" id="touchIcon" href="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">
+<title>My Ledger</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-skin="classic">
+
+<!-- App lock / PIN entry (hidden unless a PIN is set) -->
+<div id="lockScreen" class="lock-screen hidden" role="dialog" aria-label="App lock">
+  <div class="lock-title" id="lockTitle">Enter PIN</div>
+  <div class="lock-dots" id="lockDots"></div>
+  <div class="lock-msg" id="lockMsg"></div>
+  <div class="lock-pad" id="lockPad">
+    <button type="button" class="numpad-key" data-pin="1">1</button><button type="button" class="numpad-key" data-pin="2">2</button><button type="button" class="numpad-key" data-pin="3">3</button>
+    <button type="button" class="numpad-key" data-pin="4">4</button><button type="button" class="numpad-key" data-pin="5">5</button><button type="button" class="numpad-key" data-pin="6">6</button>
+    <button type="button" class="numpad-key" data-pin="7">7</button><button type="button" class="numpad-key" data-pin="8">8</button><button type="button" class="numpad-key" data-pin="9">9</button>
+    <button type="button" class="numpad-key op-key" data-action="lock-cancel" id="lockCancel">Cancel</button><button type="button" class="numpad-key" data-pin="0">0</button><button type="button" class="numpad-key op-key" data-pin="del" aria-label="Delete">⌫</button>
+  </div>
+  <button type="button" class="lock-link hidden" id="lockRecovery" data-action="lock-recovery">Forgot PIN? Use recovery code</button>
+</div>
+
+<div id="recoveryBanner" class="banner error hidden"><span>Saved data could not be read. Nothing has been overwritten.</span><button type="button" data-action="recovery-export">Export raw</button></div>
+<div id="ratesBanner" class="banner hidden"><span id="ratesBannerText"></span><button type="button" data-action="retry-rates">Retry</button><a id="ratesReport" class="banner-link" href="#">Report</a></div>
+<div id="unconvertedBanner" class="banner hidden"><span id="unconvertedText"></span><button type="button" data-action="retry-rates">Retry</button></div>
+
+<div class="app-shell" id="appShell">
+
+  <!-- ===== HOME ===== -->
+  <section id="page-home" class="page active" aria-label="Home">
+    <div class="home-head">
+      <button type="button" class="profile-chip" data-action="open-page" data-page="profile" aria-label="Profile">
+        <img class="avatar" id="avatarImg" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><span class="avatar-fallback" id="avatarFallback">A</span>
+        <span class="profile-name" id="profileName">Alex</span>
+      </button>
+      <button type="button" class="head-done hidden" id="homeEditDoneBtn" data-action="home-edit-done">Done</button>
+    </div>
+
+    <div class="period-bar">
+      <button type="button" class="icon-button" data-action="home-prev" aria-label="Previous">‹</button>
+      <button type="button" class="period-title" id="homeLabel" data-action="open-month-picker" data-target="home">—</button>
+      <button type="button" class="icon-button" data-action="home-next" aria-label="Next">›</button>
+      <div class="segmented mini" id="homeScope"><button type="button" class="segment active" data-scope="month">Month</button><button type="button" class="segment" data-scope="year">Year</button></div>
+    </div>
+
+    <div class="template-row" id="quickTemplates"></div>
+
+    <section class="total-group" id="expenseGroup">
+      <button type="button" class="total-row" data-action="toggle-group" data-group="expense" aria-expanded="true">
+        <span class="total-label">Total Expense</span><span class="total-value negative" id="homeExpense">0.00</span><span class="chev">›</span>
+      </button>
+      <div class="budget-line"><div class="budget-bar-fill" id="homeBudgetFill"></div></div>
+      <div class="category-grid" id="expenseGrid"></div>
+    </section>
+
+    <section class="total-group" id="incomeGroup">
+      <div class="total-row">
+        <button type="button" class="total-main" data-action="toggle-group" data-group="income" aria-expanded="false"><span class="total-label">Total Income</span><span class="total-value positive" id="homeIncome">0.00</span></button>
+        <button type="button" class="eye-btn" id="homeEye" data-action="toggle-hide-income" aria-label="Hide or show income"><svg class="eye-on" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg></button>
+        <span class="chev">›</span>
+      </div>
+      <div class="category-grid hidden" id="incomeGrid"></div>
+    </section>
+  </section>
+
+  <!-- ===== DETAILS ===== -->
+  <section id="page-details" class="page" aria-label="Details">
+    <div class="page-head"><h1>Details</h1>
+      <div class="segmented mini" id="viewSeg"><button type="button" class="segment active" data-view="list">List</button><button type="button" class="segment" data-view="calendar">Calendar</button></div>
+    </div>
+    <div class="period-bar">
+      <button type="button" class="icon-button" data-action="details-prev" aria-label="Previous month">‹</button>
+      <button type="button" class="period-title" id="detailsLabel" data-action="open-month-picker" data-target="details">—</button>
+      <button type="button" class="icon-button" data-action="details-next" aria-label="Next month">›</button>
+    </div>
+    <div class="summary-grid">
+      <div class="summary-card income"><div class="summary-label"><span>Income</span><button type="button" class="eye-btn" id="detailsEye" data-action="toggle-hide-income" aria-label="Hide or show income"><svg class="eye-on" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg></button></div><div class="summary-value positive" id="monthIncome">0.00</div></div>
+      <div class="summary-card expense"><div class="summary-label"><span>Expense</span></div><div class="summary-value negative" id="monthExpense">0.00</div></div>
+      <div class="summary-card balance"><div class="summary-label"><span>Balance</span></div><div class="summary-value" id="monthBalance">0.00</div></div>
+    </div>
+
+    <div id="calendarView" class="hidden">
+      <div class="dp-weekdays"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
+    <div id="listView">
+      <div class="search-row">
+        <input type="search" class="search-input" id="searchInput" placeholder="Search note, category, subcategory, amount" autocomplete="off">
+        <button type="button" class="button button-secondary" id="filterToggleBtn" data-action="toggle-filter" aria-expanded="false">Filter</button>
+      </div>
+      <div class="filter-panel hidden" id="filterPanel">
+        <label>From <button type="button" class="date-trigger" id="filterFromBtn" data-action="pick-date" data-target="filterFrom">Any</button></label>
+        <label>To <button type="button" class="date-trigger" id="filterToBtn" data-action="pick-date" data-target="filterTo">Any</button></label>
+        <label>Category <select id="filterCategory"><option value="">All</option></select></label>
+        <label>Subcategory <select id="filterTag"><option value="">All</option></select></label>
+        <div class="filter-error hidden" id="filterError"></div>
+        <button type="button" class="button button-secondary full" data-action="clear-filter">Clear filters</button>
+      </div>
+      <div class="chip-row" id="typeChips">
+        <button type="button" class="chip active" data-type="all">All</button><button type="button" class="chip" data-type="expense">Expense</button>
+        <button type="button" class="chip" data-type="income">Income</button><button type="button" class="chip" data-type="refund">Refund</button>
+      </div>
+      <p class="swipe-hint">Swipe left to edit, refund, copy, or delete</p>
+      <div class="record-list" id="recordList"></div>
+    </div>
+  </section>
+
+  <!-- ===== STATS ===== -->
+  <section id="page-stats" class="page" aria-label="Stats">
+    <div class="page-head"><h1>Stats</h1>
+      <div class="segmented mini" id="statsScope"><button type="button" class="segment active" data-scope="month">Month</button><button type="button" class="segment" data-scope="year">Year</button></div>
+    </div>
+    <div class="period-bar">
+      <button type="button" class="icon-button" data-action="stats-prev" aria-label="Previous">‹</button>
+      <button type="button" class="period-title" id="statsLabel" data-action="open-month-picker" data-target="stats">—</button>
+      <button type="button" class="icon-button" data-action="stats-next" aria-label="Next">›</button>
+    </div>
+    <div class="budget-card" id="budgetCard">
+      <div class="budget-top"><span class="eyebrow">Monthly Budget</span><span class="streak-text" id="kpiStreak"></span></div>
+      <div class="budget-main">
+        <span class="budget-used" id="budgetUsed">0.00</span><span class="budget-sep">/</span>
+        <button type="button" class="budget-total" id="budgetTotal" data-action="edit-budget" aria-label="Edit budget">0.00</button>
+        <input type="number" class="budget-input hidden" id="budgetInput" inputmode="decimal" min="0" step="0.01" aria-label="Monthly budget">
+      </div>
+      <div class="budget-bar"><div class="budget-bar-fill" id="budgetBarFill"></div></div>
+      <div class="budget-meta"><span id="budgetPercent">0% Used</span><span class="budget-left" id="budgetLeft"></span></div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi"><span class="kpi-label" id="kpiRecLabel">Month / All records</span><b id="kpiRecords">0</b></div>
+      <div class="kpi"><span class="kpi-label">Avg / day</span><b id="kpiAvg">0.00</b></div>
+      <div class="kpi"><span class="kpi-label">Net</span><b id="kpiNet">0.00</b></div>
+    </div>
+    <div class="panel"><h3 id="statsCatTitle">Spending by Category</h3><div id="statsCategory"></div></div>
+    <div class="panel"><h3 id="statsTrendTitle">Last 6 Months</h3><div id="statsTrend"></div></div>
+  </section>
+
+  <!-- ===== SETTINGS (flat Layer 1; Appearance expands to Layer 2 → swatches Layer 3) ===== -->
+  <section id="page-settings" class="page" aria-label="Settings">
+    <div class="page-head"><h1>Settings</h1></div>
+
+    <div class="group">
+      <button type="button" class="row" data-action="open-page" data-page="profile"><span class="set-icon" style="background:#3478F6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg></span><span class="row-label">Profile &amp; Security<small id="profileSummary"></small></span><span class="chev">›</span></button>
+    </div>
+
+    <div class="group">
+      <div class="row"><span class="set-icon" style="background:#8B5CF6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span><span class="row-label">Date Format</span>
+        <select id="dateFormatSelect" aria-label="Date format"><option value="DD/MM/YYYY">DD/MM/YYYY</option><option value="MM/DD/YYYY">MM/DD/YYYY</option><option value="YYYY-MM-DD">YYYY-MM-DD</option></select></div>
+    </div>
+
+    <div class="group">
+      <div class="accordion" id="appearanceBox">
+        <button type="button" class="row" data-action="toggle-accordion" aria-expanded="false"><span class="set-icon" style="background:#E45B86"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-.9 2-1.8 0-1.3-1-1.4-1-2.5 0-1 .8-1.7 1.9-1.7H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16" cy="10" r="1"/></svg></span><span class="row-label">Appearance</span><span class="chev">›</span></button>
+        <div class="accordion-content">
+          <div class="row"><span class="row-label">Mode</span><select id="appearanceMode" aria-label="Mode"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
+          <button type="button" class="row" data-action="toggle-swatches" data-target="accentSwatches" aria-expanded="false"><span class="row-label">Accent Color</span><span class="row-value"><span class="swatch-trigger" id="accentPreview"></span><span class="chev">›</span></span></button>
+          <div class="swatch-grid hidden" id="accentSwatches" data-setting="themeColor"></div>
+          <button type="button" class="row" data-action="toggle-swatches" data-target="skinSwatches" aria-expanded="false"><span class="row-label">Theme</span><span class="row-value"><span class="swatch-trigger" id="skinPreview"></span><span class="chev">›</span></span></button>
+          <div class="swatch-box hidden" id="skinSwatches"><div class="swatch-cap">Cool</div><div class="swatch-grid" id="skinCool" data-setting="skinColor"></div><div class="swatch-cap">Warm</div><div class="swatch-grid" id="skinWarm" data-setting="skinColor"></div></div>
+          <div class="row"><span class="row-label">Text Size</span><select id="fontSizeSelect" aria-label="Text size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></div>
+          <div class="row"><span class="row-label">Font</span><select id="fontFormatSelect" aria-label="Font"><option value="system">System</option><option value="rounded">Rounded</option><option value="serif">Serif</option><option value="mono">Mono</option><option value="script">Script</option></select></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <button type="button" class="row" data-action="open-page" data-page="categories"><span class="set-icon" style="background:#F06B5B"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg></span><span class="row-label">Categories</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="open-page" data-page="currencies"><span class="set-icon" style="background:#D99016"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.2C14 8.4 13.1 8 12 8c-1.5 0-2.5.8-2.5 1.9 0 2.6 5 1.4 5 4.2 0 1.1-1 1.9-2.5 1.9-1.2 0-2.2-.5-2.6-1.4M12 6.5V8m0 8v1.5"/></svg></span><span class="row-label">Currencies</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="open-page" data-page="templates"><span class="set-icon" style="background:#5856D6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg></span><span class="row-label">Quick Templates</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="open-page" data-page="recurring"><span class="set-icon" style="background:#16A36A"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V9a3 3 0 0 1 3-3h11l-3-3M20 13v2a3 3 0 0 1-3 3H6l3 3"/></svg></span><span class="row-label">Recurring Manager</span><span class="chev">›</span></button>
+    </div>
+
+    <div class="group">
+      <button type="button" class="row" data-action="backup"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg></span><span class="row-label">Backup file (share)</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="copy-backup"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg></span><span class="row-label">Backup text (copy)</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="cloud-restore"><span class="set-icon" style="background:#0A84FF"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4 4 0 0 1-.6-7.9A6 6 0 0 1 18 9.5 4.3 4.3 0 0 1 17.5 18z"/></svg></span><span class="row-label">Cloud copy — restore<small id="cloudStatus"></small></span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="export-csv"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></span><span class="row-label">Export CSV</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="restore"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg></span><span class="row-label">Restore from file</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="paste-restore"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg></span><span class="row-label">Restore from text</span><span class="chev">›</span></button>
+      <button type="button" class="row" data-action="open-page" data-page="quarantine"><span class="set-icon" style="background:#F06B5B"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.4v.1"/></svg></span><span class="row-label">Review quarantined<small id="quarantineCount"></small></span><span class="chev">›</span></button>
+      <input type="file" id="restoreFileInput" accept="application/json,.json" class="hidden">
+    </div>
+    <p class="muted center" id="versionLabel">My Ledger</p>
+  </section>
+</div>
+
+<nav class="tabbar" aria-label="Main">
+  <button type="button" class="tab-item active" data-tab="home" aria-label="Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg><span>Home</span></button>
+  <button type="button" class="tab-item" data-tab="details" aria-label="Details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Details</span></button>
+  <div class="tab-fab-slot"><button type="button" class="tab-fab" data-action="add-record" aria-label="Add record"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div>
+  <button type="button" class="tab-item" data-tab="stats" aria-label="Stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V10M12 20V4M19 20v-7"/></svg><span>Stats</span></button>
+  <button type="button" class="tab-item" data-tab="settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg><span>Settings</span></button>
+</nav>
+
+<!-- ===== PUSH SUB-PAGES ===== -->
+<section id="sub-profile" class="sub-page hidden" aria-label="Profile">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title">Profile</span><button type="button" class="nav-action" data-action="save-profile">Save</button></div>
+  <div class="sub-content">
+    <div class="profile-hero"><label class="avatar-big"><img id="profileAvatarBig" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><span id="profileAvatarFallback">A</span><input type="file" id="profileAvatarInput" accept="image/*" class="hidden"></label><span class="muted">Tap to change photo</span></div>
+    <div class="group">
+      <div class="name-field"><label for="profileNameInput">NAME</label><div class="name-box"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg><input type="text" id="profileNameInput" maxlength="20" aria-label="Name" placeholder="Tap to enter your name"></div></div>
+      <div class="name-field"><label for="profileIdInput">USER ID</label><div class="name-box"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg><input type="text" id="profileIdInput" maxlength="24" autocapitalize="none" aria-label="User ID" placeholder="Tap to enter a user ID"></div></div>
+    </div>
+    <div class="group-title">Security</div>
+    <div class="group">
+      <div class="row"><span class="row-label">App Lock<small id="lockState">Off</small></span><input type="checkbox" class="switch" id="lockToggle" aria-label="App lock"></div>
+      <button type="button" class="row" data-action="change-pin" id="changePinRow"><span class="row-label">Change PIN</span><span class="chev">›</span></button>
+      <div class="row"><span class="row-label">Face ID<small>Available in the iOS app</small></span><input type="checkbox" class="switch" disabled aria-label="Face ID"></div>
+    </div>
+    <div class="group"><button type="button" class="row danger-row" id="logoutRow" data-action="logout"><span class="row-label">Log out<small>Locks the app. Your data is kept.</small></span></button></div>
+  </div>
+</section>
+
+<section id="sub-categories" class="sub-page hidden" aria-label="Categories">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title">Categories</span><button type="button" class="nav-action" id="categoriesEditBtn" data-action="categories-toggle-edit">Edit</button></div>
+  <div class="sub-content">
+    <div class="segmented" id="categoriesSegment"><button type="button" class="segment active" data-filter="expense">Expense</button><button type="button" class="segment" data-filter="income">Income</button><button type="button" class="segment" data-filter="archived">Archived</button></div>
+    <div class="group" id="categoriesList"></div>
+    <div class="group"><button type="button" class="row add-row" data-action="add-category"><span class="row-label">＋ Add Category</span></button></div>
+    <p class="row-hint">Drag ≡ to reorder. Categories with history are archived, never erased.</p>
+  </div>
+</section>
+
+<section id="sub-categoryEdit" class="sub-page hidden" aria-label="Edit Category">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Categories</button><span class="nav-title" id="categoryEditTitle">Edit Category</span><button type="button" class="nav-action" data-action="save-category">Save</button></div>
+  <div class="sub-content">
+    <div class="group">
+      <div class="name-field"><label for="catNameInput">NAME</label><div class="name-box"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg><input type="text" id="catNameInput" maxlength="24" aria-label="Category name" placeholder="Tap to enter a category name"></div></div>
+      <div class="row"><span class="row-label">Type</span><div class="segmented mini" id="catKindSeg"><button type="button" class="segment active" data-kind="expense">Expense</button><button type="button" class="segment" data-kind="income">Income</button></div></div>
+      <button type="button" class="row" data-action="change-icon"><span class="row-label">Change Icon</span><span class="row-value"><span class="row-icon" id="catIconPreview"></span><span class="chev">›</span></span></button>
+      <button type="button" class="row" data-action="toggle-swatches" data-target="catColorSwatches" aria-expanded="false"><span class="row-label">Color</span><span class="row-value"><span class="swatch-trigger" id="catColorPreview"></span><span class="chev">›</span></span></button>
+      <div class="swatch-grid hidden" id="catColorSwatches" data-setting="catColor"></div>
+    </div>
+    <div class="group-title">Subcategories</div>
+    <div class="group" id="tagList"></div>
+    <div class="group"><button type="button" class="row add-row" data-action="add-tag"><span class="row-label">＋ Add Subcategory</span></button></div>
+    <p class="row-hint">Drag ≡ to reorder. Subcategories used by records are archived, not erased.</p>
+    <div class="group hidden" id="categoryDangerGroup"><button type="button" class="row danger-row" data-action="delete-category"><span class="row-label">Archive / Delete Category</span></button></div>
+  </div>
+</section>
+
+<section id="sub-recurring" class="sub-page hidden" aria-label="Recurring Manager">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title">Recurring</span><button type="button" class="nav-action" data-action="add-rule">＋ New</button></div>
+  <div class="sub-content">
+    <div class="segmented" id="recurringSegment"><button type="button" class="segment active" data-filter="active">Active</button><button type="button" class="segment" data-filter="archived">Archived</button></div>
+    <p class="swipe-hint">Swipe left to edit or archive. Drag ≡ to reorder.</p>
+    <div class="record-list" id="recurringList"></div>
+  </div>
+</section>
+
+<section id="sub-currencies" class="sub-page hidden" aria-label="Currencies">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title">Currencies</span><button type="button" class="nav-action" data-action="add-currency">＋ Add</button></div>
+  <div class="sub-content"><p class="swipe-hint">Swipe left to set default or delete. Drag ≡ to reorder.</p><div class="record-list" id="currencyList"></div><p class="row-hint" id="ratesInfo"></p></div>
+</section>
+
+<section id="sub-templates" class="sub-page hidden" aria-label="Quick Templates">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title">Quick Templates</span><button type="button" class="nav-action" data-action="add-template">＋ New</button></div>
+  <div class="sub-content"><p class="swipe-hint">Swipe left to edit or delete. Drag ≡ to reorder.</p><div class="record-list" id="templateList"></div></div>
+</section>
+
+<section id="sub-quarantine" class="sub-page hidden" aria-label="Quarantined records">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title">Quarantine</span><span></span></div>
+  <div class="sub-content"><p class="muted mb">These records could not be validated. They are kept untouched and included in backups.</p><div class="group" id="quarantineList"></div></div>
+</section>
+
+<!-- ===== THE unified form: Record · Template · Recurring Rule ===== -->
+<dialog id="formDialog" class="app-dialog">
+  <form id="formEl" method="dialog" novalidate class="form-wrap">
+    <div class="dialog-header"><div class="hdr-main"><h2 id="formTitle">Add Record</h2><button type="button" class="cat-pill" id="formCatBtn" data-action="form-cat-pick"></button></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+    <div class="dialog-body">
+      <div class="form-pad hidden" id="formNameRow"><input type="text" class="text-input" id="formName" maxlength="20" placeholder="Template name" aria-label="Template name"></div>
+      <div class="segmented form-pad" id="formTypeSeg"><button type="button" class="segment active" data-type="expense">Expense</button><button type="button" class="segment" data-type="income">Income</button></div>
+      <div class="numpad-display"><div class="numpad-expression" id="numpadExpression"></div><div class="numpad-amount" id="numpadAmount">0</div><div class="conversion-hint" id="conversionHint"></div></div>
+
+      <div class="tool-row">
+        <button type="button" class="tool-btn" id="toolNote" data-action="tool-note" aria-label="Note">📝</button>
+        <button type="button" class="tool-btn" id="toolPhoto" data-action="tool-photo" aria-label="Photo">📷</button>
+        <button type="button" class="tool-btn" id="toolRepeat" data-action="tool-repeat" aria-label="Repeat"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3l3 3-3 3"/><path d="M4 11V9a3 3 0 0 1 3-3h13"/><path d="M7 21l-3-3 3-3"/><path d="M20 13v2a3 3 0 0 1-3 3H4"/></svg></button>
+              <button type="button" class="tool-btn date-pill" style="margin-left:auto" id="toolDate" data-action="pick-date" data-target="form" aria-label="Date and time"><span aria-hidden="true">📅</span><span id="toolInfo"></span></button>
+      </div>
+      <div class="pop form-pad hidden" id="notePanel"><input type="text" class="text-input" id="formNote" maxlength="120" placeholder="Note" aria-label="Note"></div>
+      <div class="pop form-pad hidden" id="photoPanel">
+        <div class="photo-actions">
+          <label class="button button-secondary">📷 Camera<input type="file" id="photoCamera" accept="image/*" capture="environment" class="hidden"></label>
+          <label class="button button-secondary">🖼️ Library<input type="file" id="photoLibrary" accept="image/*" class="hidden"></label>
+          <button type="button" class="button button-secondary hidden" id="photoRemove" data-action="photo-remove">Remove</button>
+        </div>
+        <img id="photoPreview" class="photo-preview hidden" alt="Attachment preview">
+      </div>
+      <div class="pop form-pad hidden" id="repeatPanel">
+        <div class="segmented" id="repeatKind"><button type="button" class="segment active" data-kind="recurring">Recurring</button><button type="button" class="segment" data-kind="subscription">Subscription</button><button type="button" class="segment" data-kind="installment">Installment</button></div>
+        <div class="repeat-grid">
+          <label>Every <input type="number" class="text-input" id="repeatInterval" min="1" max="99" value="1" aria-label="Interval"></label>
+          <label>Frequency <select class="text-input" id="repeatFreq" aria-label="Frequency"><option value="daily">Day(s)</option><option value="weekly">Week(s)</option><option value="monthly" selected>Month(s)</option><option value="yearly">Year(s)</option></select></label>
+          <label id="repeatTotalWrap" class="hidden">Total payments <input type="number" class="text-input" id="repeatTotal" min="2" max="600" placeholder="12" aria-label="Total payments"></label>
+          <button type="button" class="date-trigger" id="repeatEndBtn" data-action="pick-date" data-target="ruleEnd">End: None</button>
+        </div>
+      </div>
+
+      <div class="label-row" id="formSubs" aria-label="Subcategory"></div>
+      <div class="field-error hidden" id="formError"></div>
+
+      <div class="numpad-keys" id="numpadKeys">
+        <button type="button" class="numpad-key" data-key="7">7</button><button type="button" class="numpad-key" data-key="8">8</button><button type="button" class="numpad-key" data-key="9">9</button><button type="button" class="numpad-key op-key" data-action="backspace" aria-label="Backspace">⌫</button>
+        <button type="button" class="numpad-key" data-key="4">4</button><button type="button" class="numpad-key" data-key="5">5</button><button type="button" class="numpad-key" data-key="6">6</button><button type="button" class="numpad-key op-key" data-op="pm" id="opPM">+</button>
+        <button type="button" class="numpad-key" data-key="1">1</button><button type="button" class="numpad-key" data-key="2">2</button><button type="button" class="numpad-key" data-key="3">3</button><button type="button" class="numpad-key op-key" data-op="md" id="opMD">×</button>
+        <button type="button" class="numpad-key cur-key" id="currencyBtn" data-action="pick-currency">SGD</button><button type="button" class="numpad-key" data-key="0">0</button><button type="button" class="numpad-key" data-key=".">.</button><button type="button" class="numpad-key save-key" id="numpadMainKey" data-action="numpad-main" aria-label="Save">✓</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="catPickDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Choose Category</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body"><div class="cat-pick-grid" id="catPickGrid"></div></div>
+</dialog>
+
+<dialog id="pasteDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Restore from text</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body"><div class="form-field"><label for="pasteBackup">Paste the backup text here</label><textarea id="pasteBackup" rows="8" style="width:100%" autocapitalize="none" autocomplete="off" spellcheck="false"></textarea></div></div>
+  <div class="dialog-actions"><button type="button" class="button button-secondary" data-action="close-dialog">Cancel</button><button type="button" class="button button-primary" data-action="paste-restore-go">Continue</button></div>
+</dialog>
+
+<dialog id="detailDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Record</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body" id="detailBody"></div>
+</dialog>
+
+<!-- THE unified DatePicker: the only calendar in the app -->
+<dialog id="datePickerDialog" class="app-dialog">
+  <div class="dialog-header"><h2 id="dpHeading">Select Date</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body">
+    <div class="dp-header">
+      <button type="button" class="icon-button" data-action="dp-prev" aria-label="Previous">‹</button>
+      <button type="button" class="dp-title" id="dpTitle" data-action="dp-title">—</button>
+      <button type="button" class="icon-button" data-action="dp-next" aria-label="Next">›</button>
+    </div>
+    <div id="dpDayView"><div class="dp-weekdays"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div><div class="dp-grid" id="dpGrid"></div></div>
+    <div class="dp-month-grid hidden" id="dpMonthGrid"></div>
+    <div class="dp-year-grid hidden" id="dpYearGrid"></div>
+    <div class="dp-time hidden" id="dpTimeRow"><span>Time</span><div class="wheel" id="wheel" aria-label="Time"><div class="wheel-col" id="whH"></div><span class="wheel-sep">:</span><div class="wheel-col" id="whM"></div><div class="wheel-band"></div></div><input type="hidden" id="dpTime" value="00:00"></div>
+  </div>
+  <div class="dialog-actions">
+    <button type="button" class="button button-secondary" id="dpClearBtn" data-action="dp-clear">Clear</button>
+    <button type="button" class="button button-secondary" data-action="dp-today">Today</button>
+    <button type="button" class="button button-primary hidden" id="dpDoneBtn" data-action="dp-done">Done</button>
+  </div>
+</dialog>
+
+<dialog id="currencyPickerDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Currency</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body"><div class="group inset" id="currencyPickerList"></div></div>
+</dialog>
+
+<dialog id="currencyEditDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Add Currency</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body">
+    <div class="form-field"><input id="curSearch" type="search" placeholder="Search code or name" autocapitalize="none" aria-label="Search currency"></div>
+    <div class="group inset" id="curAddList"></div>
+  </div>
+</dialog>
+
+<dialog id="scopeDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Apply Changes To</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body"><div class="group inset">
+    <button type="button" class="row" data-action="scope-choice" data-scope="occurrence"><span class="row-label">This occurrence only</span></button>
+    <button type="button" class="row" data-action="scope-choice" data-scope="future"><span class="row-label">This and future occurrences</span></button>
+  </div></div>
+</dialog>
+
+<dialog id="restorePreviewDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Restore Backup</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body"><div class="form-field"><div id="restorePreviewBody"></div></div></div>
+  <div class="dialog-actions"><button type="button" class="button button-secondary" data-action="close-dialog">Cancel</button><button type="button" class="button button-primary" data-action="restore-confirm">Restore</button></div>
+</dialog>
+
+<dialog id="iconDialog" class="app-dialog">
+  <div class="dialog-header"><h2>Choose Icon</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body"><div class="swatch-grid" id="iconGrid"></div></div>
+</dialog>
+
+<div id="ctxRoot"></div>
+<div id="sheetRoot"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>
