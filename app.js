@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.11";
+const APP_VERSION = "1.12";
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
