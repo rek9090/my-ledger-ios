@@ -293,5 +293,5 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .sticky-top .page-head { margin: 0 0 8px; }
 .sticky-top .period-bar { margin-bottom: 8px; }
 
-.cal-amts { margin-top: auto; display: grid; grid-template-columns: auto auto; justify-content: center; max-width: 100%; font-size: 9px; line-height: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.cal-amts .ip { text-align: right; } .cal-amts .fp { text-align: left; font-style: normal; font-weight: 700; } .cal-amts .ci { color: var(--positive); height: 11px; } .cal-amts .ce { color: var(--negative); height: 11px; }
+.cal-amts { margin: auto auto 0; display: flex; flex-direction: column; align-items: flex-start; width: fit-content; max-width: 100%; font-size: 9px; line-height: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cal-amts .ci, .cal-amts .ce { display: block; height: 11px; } .cal-amts .ci { color: var(--positive); } .cal-amts .ce { color: var(--negative); }

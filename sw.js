@@ -1,5 +1,5 @@
 /* My Ledger service worker: app shell works offline; updates arrive on the next open (revalidated, never served from the HTTP cache). Bump CACHE with every release. */
-const CACHE = "my-ledger-v1.12";
+const CACHE = "my-ledger-v1.13";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "apple-touch-icon.png", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => Promise.all(SHELL.map((u) => fetch(new Request(u, { cache: "reload" })).then((r) => { if (r.ok) return c.put(u, r); })))).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => {
