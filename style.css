@@ -283,3 +283,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .tool-btn.date-pill { display: inline-flex; flex-direction: row; align-items: center; justify-content: center; gap: 6px; height: 36px; }
 .tool-btn.date-pill span { line-height: 1; }
 .chip.label-chip, .chip.gear { font-size: var(--fs-4); min-height: 24px; padding: 3px 10px; } .chip.label-chip { max-width: 96px; } .label-row { gap: 5px; }
+.banner-x { margin-left: 6px; font-size: 16px; line-height: 1; padding: 6px 8px; opacity: .7; }
+
+.wheel-ap { display: none; width: 52px; }
+.wheel.w12 { width: 214px; }
+.wheel.w12 .wheel-ap { display: block; }

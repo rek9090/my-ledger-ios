@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.04";
+const APP_VERSION = "1.07";
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
@@ -11,6 +11,9 @@ const BUILTIN_DATE = "2026-11-01";
 /* Approximate reference rates (1 SGD = x). Only a safety net: replaced by live rates, and records saved with them are re-calculated. */
 const BUILTIN_RATES = { SGD: 1, USD: 0.77, EUR: 0.66, GBP: 0.58, JPY: 118, CNY: 5.5, HKD: 6, MYR: 3.3, AUD: 1.18, CAD: 1.08, CHF: 0.62, NZD: 1.33, KRW: 1100, THB: 25, IDR: 12700, INR: 68, TWD: 24, PHP: 45, VND: 20000, AED: 2.83, SAR: 2.89, BND: 1, MOP: 6.2, BRL: 4.1, MXN: 14, ZAR: 14, SEK: 7.3, NOK: 7.7, DKK: 4.9, TRY: 33 };
 const DAY_MS = 864e5;
+const RATE_HIDE_KEY = "myLedger.ratesBannerHidden", BACKUP_SNOOZE_KEY = "myLedger.backupSnooze";
+const BACKUP_DAYS = { week: 7, fortnight: 14, month: 30 };
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const isEstRate = (code) => !(rates.real && rates.real[code] > 0);
 const BASE = "SGD";
 const GEN = "GEN";
@@ -81,7 +84,7 @@ const ui = { tab: "home", pages: [], homeMonth: null, detailsMonth: null, statsM
 
 function defaultSettings() {
   return { defaultCurrencyId: "cur-sgd", dateFormat: "DD/MM/YYYY", timeFormat: "24", appearanceMode: "system", skinColor: "classic", themeColor: "#3478F6",
-    hideIncome: false, removedCurrencies: [], userName: "Alex", userId: "", userAvatar: "", fontSize: "medium", fontFormat: "system", monthlyBudget: 1000,
+    hideIncome: false, backupEvery: "week", lastBackupAt: "", removedCurrencies: [], userName: "Alex", userId: "", userAvatar: "", fontSize: "medium", fontFormat: "system", monthlyBudget: 1000,
     homeExpanded: { expense: true, income: false }, lock: { enabled: false, salt: "", hash: "", recSalt: "", recHash: "" } };
 }
 function createDefaultState() {
@@ -117,14 +120,14 @@ function normalizeState(data) {
   const out = createDefaultState();
   if (!data || typeof data !== "object") return out;
   const sIn = data.settings && typeof data.settings === "object" ? data.settings : {};
-  out.settings = { ...out.settings, ...sIn };
+  out.settings = { ...out.settings, ...sIn }; if (!(out.settings.backupEvery in BACKUP_DAYS) && out.settings.backupEvery !== "off") out.settings.backupEvery = "week";
   if (!["system", "light", "dark"].includes(out.settings.appearanceMode)) out.settings.appearanceMode = "system";
   if (!SKINS.some((s) => s[0] === out.settings.skinColor)) out.settings.skinColor = "classic";
   if (!/^#[0-9a-f]{6}$/i.test(out.settings.themeColor || "")) out.settings.themeColor = "#3478F6";
   if (!["small", "medium", "large"].includes(out.settings.fontSize)) out.settings.fontSize = "medium";
   if (!["system", "rounded", "serif", "mono", "script"].includes(out.settings.fontFormat)) out.settings.fontFormat = "system";
   const he = out.settings.homeExpanded; out.settings.homeExpanded = { expense: !(he && he.expense === false), income: !!(he && he.income) };
-  const lk = out.settings.lock; out.settings.lock = { enabled: !!(lk && lk.enabled && lk.hash), salt: String(lk?.salt || ""), hash: String(lk?.hash || ""), recSalt: String(lk?.recSalt || ""), recHash: String(lk?.recHash || "") };
+  const lk = out.settings.lock; out.settings.lock = { enabled: !!(lk && lk.enabled && lk.hash), salt: String(lk?.salt || ""), hash: String(lk?.hash || ""), recSalt: String(lk?.recSalt || ""), recHash: String(lk?.recHash || ""), bio: String(lk?.bio || "") };
   out.settings.userName = String(out.settings.userName || "Alex").slice(0, 20); out.settings.userId = String(out.settings.userId || "").slice(0, 24);
   out.quarantine = Array.isArray(data.quarantine) ? data.quarantine.slice() : [];
   const rem = Array.isArray(out.settings.removedCurrencies) ? out.settings.removedCurrencies.filter((x) => typeof x === "string") : []; out.settings.removedCurrencies = rem;
@@ -152,7 +155,7 @@ function normalizeState(data) {
       currencySymbol: safeSymbol(r.currencySymbol) || (out.currencies.find((c) => c.code === code)?.symbol || code), exchangeRate: toNum(r.exchangeRate),
       date: r.date, time: /^\d{2}:\d{2}$/.test(r.time || "") ? r.time : "00:00", note: String(r.note ?? ""),
       categoryNameSnapshot: r.categoryNameSnapshot || cat?.name || "Unassigned", tag, tagNameSnapshot: r.tagNameSnapshot || tag,
-      tagId: r.tagId || cat?.tags.find((t) => t.name === tag)?.id || null, isRefund, originalRecordId: r.originalRecordId || null });
+      tagId: r.tagId || cat?.tags.find((t) => t.name === tag)?.id || null, isRefund, isReimb: !!r.isReimb && isRefund && !r.originalRecordId, originalRecordId: r.originalRecordId || null });
   });
   out.records = records;
   inferKinds(out.categories, records);
@@ -507,13 +510,33 @@ function openDatePicker(o) {
   if (wt) { $("dpTime").value = o.time || "00:00"; fillWheel(); }
   renderDP(); openDlg("datePickerDialog"); if (wt) setTimeout(() => setWheel($("dpTime").value), 30);
 }
-function fillWheel() {
-  if ($("whH").childElementCount) return;
-  $("whH").innerHTML = Array.from({ length: 24 }, (_, i) => `<div>${pad(i)}</div>`).join(""); $("whM").innerHTML = Array.from({ length: 60 }, (_, i) => `<div>${pad(i)}</div>`).join("");
-  let tm = null; const read = () => { const h = Math.min(23, Math.max(0, Math.round($("whH").scrollTop / 36))), m = Math.min(59, Math.max(0, Math.round($("whM").scrollTop / 36))); $("dpTime").value = pad(h) + ":" + pad(m); };
-  ["whH", "whM"].forEach((id) => $(id).addEventListener("scroll", () => { clearTimeout(tm); tm = setTimeout(read, 90); }));
+const is12 = () => state.settings.timeFormat === "12";
+function fmtTime(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t || "")); if (!m) return String(t || "");
+  if (!is12()) return pad(+m[1]) + ":" + m[2];
+  const h = +m[1]; return (h % 12 || 12) + ":" + m[2] + " " + (h < 12 ? "AM" : "PM");
 }
-function setWheel(v) { const [h, m] = String(v || "00:00").split(":").map(Number); $("whH").scrollTop = (h || 0) * 36; $("whM").scrollTop = (m || 0) * 36; }
+let wheelBound = false;
+function readWheel() {
+  const idx = (id) => Math.max(0, Math.round($(id).scrollTop / 36)), m = Math.min(59, idx("whM"));
+  let h;
+  if (is12()) { const hh = Math.min(11, idx("whH")) + 1, pm = Math.min(1, idx("whP")) === 1; h = (hh % 12) + (pm ? 12 : 0); } else h = Math.min(23, idx("whH"));
+  $("dpTime").value = pad(h) + ":" + pad(m);
+}
+function fillWheel() {
+  const f = is12() ? "12" : "24"; $("wheel").classList.toggle("w12", f === "12");
+  if ($("wheel").dataset.f !== f) {
+    $("wheel").dataset.f = f;
+    $("whH").innerHTML = (f === "12" ? Array.from({ length: 12 }, (_, i) => `<div>${i + 1}</div>`) : Array.from({ length: 24 }, (_, i) => `<div>${pad(i)}</div>`)).join("");
+    $("whM").innerHTML = Array.from({ length: 60 }, (_, i) => `<div>${pad(i)}</div>`).join(""); $("whP").innerHTML = "<div>AM</div><div>PM</div>";
+  }
+  if (wheelBound) return; wheelBound = true; let tm = null;
+  ["whH", "whM", "whP"].forEach((id) => $(id).addEventListener("scroll", () => { clearTimeout(tm); tm = setTimeout(readWheel, 90); }));
+}
+function setWheel(v) {
+  const [h, m] = String(v || "00:00").split(":").map(Number), hh = h || 0;
+  $("whH").scrollTop = (is12() ? ((hh % 12) || 12) - 1 : hh) * 36; $("whM").scrollTop = (m || 0) * 36; $("whP").scrollTop = hh >= 12 ? 36 : 0;
+}
 function renderDP() {
   const { y, m, view, o } = DP, sel = isYMD(o.value) ? parseYMD(o.value) : null, today = todayStr();
   $("dpDayView").classList.toggle("hidden", view !== "day"); $("dpMonthGrid").classList.toggle("hidden", view !== "month"); $("dpYearGrid").classList.toggle("hidden", view !== "year");
@@ -557,10 +580,15 @@ function renderBanners() {
   $("recoveryBanner").classList.toggle("hidden", !recoveryMode);
   const n = state.records.filter((r) => r.currencyCode !== GEN && baseOf(r) === null).length;
   const staleRates = rates.source === "builtin" || (rates.fetchedAt && Date.now() - rates.fetchedAt > 3 * DAY_MS);
-  $("ratesBanner").classList.toggle("hidden", !staleRates);
+  const hideRates = Number(lsGet(RATE_HIDE_KEY)) > Date.now() - DAY_MS;
+  $("ratesBanner").classList.toggle("hidden", !staleRates || hideRates);
   if (staleRates) { $("ratesBannerText").textContent = rates.source === "builtin" ? "Live exchange rates could not be loaded. Using built-in estimates; records will be corrected automatically once live rates arrive." : `Exchange rates are out of date (last update ${rates.date}).`;
     $("ratesReport").href = "mailto:rek9090@gmail.com?subject=" + encodeURIComponent("My Ledger: exchange rate source problem") + "&body=" + encodeURIComponent(`Rates could not be refreshed.\nLast update: ${rates.date} (${rates.source})\nApp v${APP_VERSION}\n${navigator.userAgent}`); }
-  $("unconvertedBanner").classList.toggle("hidden", n === 0);
+  $("unconvertedBanner").classList.toggle("hidden", n === 0 || ui.hideUnconv);
+  const every = BACKUP_DAYS[state.settings.backupEvery], last = state.settings.lastBackupAt ? Date.parse(state.settings.lastBackupAt) : NaN, age = Number.isFinite(last) ? Math.floor((Date.now() - last) / DAY_MS) : null;
+  const due = !!every && state.records.length > 0 && (age === null || age >= every) && !(Number(lsGet(BACKUP_SNOOZE_KEY)) > Date.now() - DAY_MS);
+  $("backupBanner").classList.toggle("hidden", !due);
+  if (due) $("backupBannerText").textContent = age === null ? "You have not backed up your records yet." : `Last backup was ${age} day${age === 1 ? "" : "s"} ago.`;
   if (n) $("unconvertedText").textContent = `${n} record(s) are waiting for an exchange rate. They are saved and will be converted automatically when online.`;
 }
 function renderAvatar() {
@@ -609,6 +637,7 @@ function filteredRecords(ignoreType) {
   return list;
 }
 function repeatBadge(r) {
+  if (r.isReimb) return { t: "Reimb.", c: "b-refund" };
   if (r.isRefund) return { t: "Refund", c: "b-refund" };
   let kind = r.repeatKind, freq = r.repeatFreq;
   if (!kind && r.recurringRuleId) { const ru = state.recurringRules.find((x) => x.id === r.recurringRuleId); kind = ru ? ru.kind : "recurring"; freq = ru ? ru.freq : "monthly"; }
@@ -627,7 +656,7 @@ function recordRow(r) {
   const bd = repeatBadge(r), head = r.categoryNameSnapshot + (r.tagNameSnapshot ? " - " + r.tagNameSnapshot : "");
   return `<div class="swipe-container"><div class="swipe-actions">${btns.join("")}</div><div class="swipe-content" data-action="open-detail" data-id="${esc(r.id)}">` +
     `<span class="record-icon" style="background:${col}33">${esc(cat?.icon || "🏷️")}</span><div class="record-main"><div class="record-title"><span class="t-text">${esc(head)}</span>${bd ? `<span class="flag-badge ${bd.c}">${esc(bd.t)}</span>` : ""}</div>` +
-    `<div class="record-subtitle">${r.note ? esc(r.note) + " · " : ""}${esc(r.time)}</div></div>` +
+    `<div class="record-subtitle">${r.note ? esc(r.note) + " · " : ""}${esc(fmtTime(r.time))}</div></div>` +
     `<div class="record-side"><span class="record-amount ${cls}">${isHiddenInc(r) ? MASK : sign + esc(fmtRec(r))}</span>${isHiddenInc(r) ? "" : conv}</div></div></div>`;
 }
 function renderDetails() {
@@ -706,8 +735,8 @@ function renderSwatches(id, colors, selected) {
 }
 function renderSettings() {
   const s = state.settings;
-  $("appearanceMode").value = s.appearanceMode === "system" ? "auto" : s.appearanceMode; $("fontSizeSelect").value = s.fontSize; $("fontFormatSelect").value = s.fontFormat;
-  $("dateFormatSelect").value = s.dateFormat;
+  $("appearanceMode").value = s.appearanceMode === "system" ? "auto" : s.appearanceMode; $("fontSizeSelect").value = s.fontSize; $("fontFormatSelect").value = s.fontFormat; $("backupEverySelect").value = s.backupEvery in BACKUP_DAYS ? s.backupEvery : "off"; $("backupStatus").textContent = s.lastBackupAt ? "Last backup " + s.lastBackupAt.slice(0, 10) : "Never backed up";
+  $("dateFormatSelect").value = s.dateFormat; $("timeFormatSelect").value = s.timeFormat === "12" ? "12" : "24";
   renderSwatches("accentSwatches", ACCENTS, s.themeColor); renderSwatches("skinCool", SKINS_COOL, s.skinColor); renderSwatches("skinWarm", SKINS_WARM, s.skinColor);
   $("accentPreview").style.background = safeColor(s.themeColor); $("skinPreview").style.background = (SKINS.find((k) => k[0] === s.skinColor) || SKINS[0])[1];
   $("profileSummary").textContent = [s.userName, s.userId && "@" + s.userId].filter(Boolean).join(" · "); $("quarantineCount").textContent = state.quarantine.length ? `${state.quarantine.length} item(s)` : "None";
@@ -715,7 +744,7 @@ function renderSettings() {
   $("versionLabel").textContent = `My Ledger v${APP_VERSION}`;
 }
 function renderSecurity() {
-  const lk = state.settings.lock; $("lockToggle").checked = lk.enabled; $("lockState").textContent = lk.enabled ? "On · PIN required on launch" : "Off"; $("changePinRow").classList.toggle("hidden", !lk.enabled);
+  const lk = state.settings.lock; $("lockToggle").checked = lk.enabled; $("lockState").textContent = lk.enabled ? "On · PIN required on launch" : "Off"; $("changePinRow").classList.toggle("hidden", !lk.enabled); $("bioRow").classList.toggle("hidden", !lk.enabled); $("bioToggle").checked = !!lk.bio; $("bioState").textContent = lk.bio ? "On · unlock with Face ID" : bioSupported() ? "Off" : "Not available in this browser";
 }
 
 /* ----- Categories page ----- */
@@ -752,7 +781,7 @@ function renderCurrenciesPage() {
   $("currencyList").innerHTML = state.currencies.map((c) => { const rt = rateOf(c.code), isDef = c.id === state.settings.defaultCurrencyId;
     const btns = (!c.generic && !isDef ? `<button type="button" class="swipe-btn copy" data-action="currency-default" data-code="${esc(c.code)}">Default</button>` : "") + `<button type="button" class="swipe-btn delete" data-action="currency-delete" data-code="${esc(c.code)}">Delete</button>`;
     return `<div class="swipe-container" data-id="${esc(c.id)}"><div class="swipe-actions">${btns}</div><div class="swipe-content"><span class="record-icon" style="background:var(--surface-soft)">${esc(c.symbol)}</span><div class="record-main"><div class="record-title"><span class="t-text">${esc(c.code)}</span>${isDef ? `<span class="flag-badge b-recurring">Default</span>` : ""}</div><div class="record-subtitle">${c.generic ? "no conversion, not counted in totals" : rt ? "1 SGD = " + rt.toFixed(4) + " " + esc(c.code) : "rate unavailable"}</div></div><span class="row-handle" aria-label="Reorder">≡</span></div></div>`; }).join("") || `<p class="row-hint">No currencies. Tap + to add one.</p>`;
-  $("ratesInfo").textContent = rates.source === "builtin" ? `Rates: built-in estimates (${BUILTIN_DATE}) — live rates not loaded yet. Base currency: ${BASE}.` : `Rates updated: ${rates.date} · ${rates.src || "saved copy"}. Refreshes once a day. Base currency: ${BASE}.`;
+  $("ratesInfo").textContent = rates.source === "builtin" ? `Rates: built-in estimates (${BUILTIN_DATE}) — live rates not loaded yet. Base currency: ${BASE}.` : `Rates updated: ${rates.date} · ${rates.src || "saved copy"}. Refreshes once a day. Base currency: ${BASE}. Rates By Exchange Rate API.`;
 }
 function renderTemplatesPage() {
   $("templateList").innerHTML = state.quickTemplates.map((t) => `<div class="swipe-container" data-id="${esc(t.id)}"><div class="swipe-actions"><button type="button" class="swipe-btn edit" data-action="edit-template" data-id="${esc(t.id)}">Edit</button><button type="button" class="swipe-btn delete" data-action="tpl-delete" data-id="${esc(t.id)}">Delete</button></div>` +
@@ -797,7 +826,7 @@ function goBack() {
 }
 
 /* ===== Unified form: Record · Template · Recurring Rule ===== */
-const fm = { mode: "record", ex: null, type: "expense", currency: BASE, date: "", time: "", photo: "", refundOf: null, catId: null, subId: "", legacy: "", panel: "", typeLocked: false,
+const fm = { mode: "record", ex: null, type: "expense", reimb: false, currency: BASE, date: "", time: "", photo: "", refundOf: null, catId: null, subId: "", legacy: "", panel: "", typeLocked: false,
   rep: { on: false, kind: "recurring", interval: 1, freq: "monthly", total: "", end: "" } };
 function refundsOf(id, skipId) { return state.records.filter((r) => r.isRefund && r.originalRecordId === id && r.id !== skipId); }
 function resolveSub(catId, cur) {
@@ -811,12 +840,12 @@ function openForm(o = {}) {
   else if (mode === "template") { ex = o.id ? state.quickTemplates.find((t) => t.id === o.id) || null : null; base = ex; }
   else { ex = o.id ? state.recurringRules.find((r) => r.id === o.id) || null : null; if (ex) { const nx = nextOcc(ex); base = ruleFieldsAt(ex, nx ? nx.key : "9999"); } }
   const preCat = o.categoryId ? catOf(o.categoryId) : null;
-  const type = orig ? "income" : base ? base.type : preCat ? preCat.kind : (o.type || "expense");
+  const type = orig ? "income" : base ? (base.isReimb ? "expense" : base.type) : preCat ? preCat.kind : (o.type || "expense");
   let amt = base && toNum(base.amount) ? base.amount : 0, catId = orig ? orig.categoryId : base ? base.categoryId : preCat ? preCat.id : sortedCats(type)[0]?.id || null;
   if (orig) amt = round2(orig.amount - refundsOf(orig.id, null).reduce((s, r) => s + r.amount, 0));
   const sub = resolveSub(catId, orig ? { tag: orig.tag, tagId: orig.tagId } : base && base.categoryId === catId ? base : null);
-  Object.assign(fm, { catOpen: false, mode, ex, type, currency: orig ? orig.currencyCode : base ? base.currencyCode : dispCode(), catId, subId: sub.subId, legacy: sub.legacy, photo: base && base.photo ? base.photo : "", refundOf: orig ? orig.id : (ex && ex.isRefund ? ex.originalRecordId : null),
-    date: mode === "record" ? (ex ? ex.date : todayStr()) : mode === "rule" ? (ex ? ex.startDate : todayStr()) : todayStr(), time: mode === "record" && ex ? ex.time : nowTime(), panel: "", typeLocked: !!orig || (mode === "record" && !!ex && !!ex.isRefund) || (mode === "rule" && !!ex),
+  Object.assign(fm, { catOpen: false, mode, ex, type, reimb: mode === "record" && !orig && (ex ? !!ex.isReimb : !!o.reimb), currency: orig ? orig.currencyCode : base ? base.currencyCode : dispCode(), catId, subId: sub.subId, legacy: sub.legacy, photo: base && base.photo ? base.photo : "", refundOf: orig ? orig.id : (ex && ex.isRefund ? ex.originalRecordId : null),
+    date: mode === "record" ? (ex ? ex.date : todayStr()) : mode === "rule" ? (ex ? ex.startDate : todayStr()) : todayStr(), time: mode === "record" && ex ? ex.time : nowTime(), panel: "", typeLocked: !!orig || (mode === "record" && !!ex && !!ex.isRefund && !ex.isReimb) || (mode === "rule" && !!ex),
     rep: ex && mode === "rule" ? { on: true, kind: ex.kind, interval: ex.interval, freq: ex.freq, total: ex.installmentTotal || "", end: ex.endDate || "" } : { on: false, kind: "recurring", interval: 1, freq: "monthly", total: "", end: "" } });
   $("formNote").value = orig ? "" : base && base.note ? base.note : ""; if ($("formNote").value) fm.panel = "note";
   $("formName").value = mode === "template" && ex ? ex.label : "";
@@ -826,10 +855,10 @@ function openForm(o = {}) {
 }
 function renderForm() {
   const isRec = fm.mode === "record", isTpl = fm.mode === "template", isRule = fm.mode === "rule", rp = fm.rep, ex = fm.ex;
-  $("formNameRow").classList.toggle("hidden", !isTpl); setSeg("formTypeSeg", "type", fm.type); $("formTypeSeg").classList.toggle("locked", fm.typeLocked);
-  $("toolDate").classList.toggle("hidden", isTpl); $("toolPhoto").classList.toggle("hidden", !isRec); $("toolRepeat").classList.toggle("hidden", !(isRec && !ex && !fm.refundOf));
+  $("formNameRow").classList.toggle("hidden", !isTpl); setSeg("formTypeSeg", "type", fm.reimb ? "reimb" : fm.type); document.querySelector("#formTypeSeg [data-type=reimb]").classList.toggle("hidden", !isRec || !!fm.refundOf); $("formTypeSeg").classList.toggle("locked", fm.typeLocked);
+  $("toolDate").classList.toggle("hidden", isTpl); $("toolPhoto").classList.toggle("hidden", !isRec); $("toolRepeat").classList.toggle("hidden", !(isRec && !fm.refundOf && !fm.reimb && !(ex && (ex.isRefund || ex.recurringRuleId))));
   $("toolNote").classList.toggle("on", !!$("formNote").value.trim()); $("toolPhoto").classList.toggle("on", !!fm.photo); $("toolRepeat").classList.toggle("on", rp.on && !isRule);
-  $("toolInfo").textContent = isRec ? `${fmtDate(fm.date)} ${fm.time}` : isRule ? "Starts " + fmtDate(fm.date) : "";
+  $("toolInfo").textContent = isRec ? `${fmtDate(fm.date)} ${fmtTime(fm.time)}` : isRule ? "Starts " + fmtDate(fm.date) : "";
   $("notePanel").classList.toggle("hidden", fm.panel !== "note"); $("photoPanel").classList.toggle("hidden", fm.panel !== "photo"); $("repeatPanel").classList.toggle("hidden", !(isRule || (fm.panel === "repeat" && rp.on)));
   $("photoPreview").classList.toggle("hidden", !fm.photo); $("photoPreview").src = fm.photo.startsWith("data:image/") ? fm.photo : ""; $("photoRemove").classList.toggle("hidden", !fm.photo);
   const lockStruct = isRule && ex && (ex.generatedMonths || []).length > 0;
@@ -865,7 +894,7 @@ function saveForm() {
   if (!(amount > 0)) return formErr("Enter an amount greater than 0.");
   if (!cat) return formErr("Choose a category.");
   if (fm.mode === "rule") return saveRuleForm(amount, cat);
-  const ex = fm.ex, code = fm.currency, note = $("formNote").value.trim(), sf = subFields(cat, ex), rp = fm.rep, repeat = rp.on && !ex && !fm.refundOf;
+  const ex = fm.ex, code = fm.currency, note = $("formNote").value.trim(), sf = subFields(cat, ex), rp = fm.rep, repeat = rp.on && !fm.refundOf && !fm.reimb && !(ex && (ex.isRefund || ex.recurringRuleId));
   if (!isYMD(fm.date)) return formErr("Choose a date.");
   let rate = rateOf(code), base, est = false;
   if (code === BASE) { rate = 1; base = amount; }
@@ -886,10 +915,10 @@ function saveForm() {
     rule.generatedMonths = [occKey(rule, fm.date)];
   }
   const now = new Date().toISOString(), same = ex && ex.categoryId === cat.id;
-  const rec = { ...(ex || { createdAt: now, recurringRuleId: null }), id: ex ? ex.id : makeId("rec"), type: fm.refundOf ? "income" : fm.type, amount, currencyCode: code,
+  const rec = { ...(ex || { createdAt: now, recurringRuleId: null }), id: ex ? ex.id : makeId("rec"), type: fm.refundOf || fm.reimb ? "income" : fm.type, amount, currencyCode: code,
     currencySymbol: ex && ex.currencyCode === code && ex.currencySymbol ? ex.currencySymbol : symOf(code), exchangeRate: rate, baseAmount: base, categoryId: cat.id,
     categoryNameSnapshot: same && ex.categoryNameSnapshot ? ex.categoryNameSnapshot : cat.name, tag: sf.tag, tagId: sf.tagId, tagNameSnapshot: sf.snap, date: fm.date, time: fm.time || "00:00",
-    note, photo: fm.photo || "", isRefund: ex ? !!ex.isRefund : !!fm.refundOf, originalRecordId: ex ? ex.originalRecordId || null : (fm.refundOf || null), updatedAt: now };
+    note, photo: fm.photo || "", isRefund: fm.refundOf ? true : ex ? (ex.isRefund && !ex.isReimb) || !!fm.reimb : !!fm.reimb, isReimb: !fm.refundOf && !!fm.reimb, originalRecordId: ex ? ex.originalRecordId || null : (fm.refundOf || null), updatedAt: now };
   if (est) rec.rateEst = true; else delete rec.rateEst;
   if (rule) Object.assign(rec, { recurringRuleId: rule.id, ruleKey: rule.generatedMonths[0], repeatKind: rule.kind, repeatFreq: rule.freq, installmentIndex: 1, installmentTotal: rule.installmentTotal });
   const ok = commit(() => { if (rule) state.recurringRules.push(rule); if (ex) { const i = state.records.findIndex((r) => r.id === ex.id); state.records[i] = rec; } else state.records.push(rec); });
@@ -933,8 +962,8 @@ function openDetail(id) {
   const row = (l, v) => `<div class="row"><span class="row-label">${esc(l)}</span><span class="row-value">${esc(v)}</span></div>`;
   const orig = r.originalRecordId ? state.records.find((x) => x.id === r.originalRecordId) : null, rf = refundsOf(r.id, null);
   let h = `<div class="group inset">${row("Amount", isHiddenInc(r) ? MASK : (r.type === "income" && !r.isRefund ? "+" : "−") + fmtRec(r))}${r.currencyCode !== BASE && r.currencyCode !== GEN && !isHiddenInc(r) ? row("In SGD", b === null ? "Rate unavailable" : symOf(BASE) + fmtNum(b)) : ""}${r.currencyCode === GEN ? row("Totals", "Not counted (generic currency)") : ""}` +
-    row("Type", r.isRefund ? "Refund" : r.type === "income" ? "Income" : "Expense") + row("Category", r.categoryNameSnapshot + (cat && cat.name !== r.categoryNameSnapshot ? ` (now ${cat.name})` : "")) +
-    (r.tagNameSnapshot ? row("Subcategory", r.tagNameSnapshot) : "") + row("Date", fmtDate(r.date) + " " + r.time) + (r.note ? row("Note", r.note) : "") +
+    row("Type", r.isReimb ? "Reimbursement" : r.isRefund ? "Refund" : r.type === "income" ? "Income" : "Expense") + row("Category", r.categoryNameSnapshot + (cat && cat.name !== r.categoryNameSnapshot ? ` (now ${cat.name})` : "")) +
+    (r.tagNameSnapshot ? row("Subcategory", r.tagNameSnapshot) : "") + row("Date", fmtDate(r.date) + " " + fmtTime(r.time)) + (r.note ? row("Note", r.note) : "") +
     (bd && !r.isRefund ? row("Repeat", bd.t) : "") + (orig ? row("Refund of", fmtRec(orig) + " · " + fmtDate(orig.date)) : "") + (rf.length ? row("Refunded", symOf(r.currencyCode) + fmtNum(rf.reduce((s, x) => s + x.amount, 0))) : "") + `</div>`;
   if (r.photo && r.photo.startsWith("data:image/")) h += `<div class="form-field"><img src="${esc(r.photo)}" alt="Attachment" style="max-width:100%;border-radius:10px"></div>`;
   h += `<div class="dialog-actions" style="flex-wrap:wrap"><button type="button" class="button button-secondary" data-action="rec-edit" data-id="${esc(r.id)}">Edit</button>` +
@@ -980,24 +1009,57 @@ function validateBackup(o) {
   if (o.settings !== undefined && (typeof o.settings !== "object" || o.settings === null)) return "Backup settings are invalid.";
   return null;
 }
-let pendingRestore = null;
+let pendingRestore = null, pendingMerge = null;
+/* Additive import: match categories by name+kind and subcategories by name, add what is missing, skip records already imported (srcId). Never removes anything. */
+function planMerge(inc) {
+  const cur = clone(state), catMap = {}, tagMap = {}; let newCats = 0, newTags = 0, newCur = 0, added = 0, skipped = 0;
+  const have = new Set(cur.records.map((r) => r.srcId).filter(Boolean));
+  inc.categories.forEach((c) => {
+    let m = cur.categories.find((x) => x.kind === c.kind && x.name.trim().toLowerCase() === c.name.trim().toLowerCase());
+    if (!m) { m = { ...c, id: makeId("cat"), order: cur.categories.length, tags: [] }; cur.categories.push(m); newCats++; }
+    catMap[c.id] = m.id;
+    c.tags.forEach((t) => {
+      let mt = m.tags.find((x) => x.name.trim().toLowerCase() === t.name.trim().toLowerCase());
+      if (!mt) { mt = { id: makeId("tag"), name: t.name, order: m.tags.length, archived: false }; m.tags.push(mt); newTags++; }
+      tagMap[t.id] = mt.id;
+    });
+  });
+  const used = new Set(inc.records.map((r) => r.currencyCode));
+  inc.currencies.forEach((c) => { if (used.has(c.code) && !cur.currencies.some((x) => x.code === c.code)) { cur.settings.removedCurrencies = (cur.settings.removedCurrencies || []).filter((x) => x !== c.code); cur.currencies.push({ ...c, id: "cur-" + c.code.toLowerCase(), order: cur.currencies.length }); newCur++; } });
+  inc.records.forEach((r) => {
+    if (r.srcId && have.has(r.srcId)) { skipped++; return; }
+    cur.records.push({ ...r, id: makeId("rec"), categoryId: catMap[r.categoryId] || r.categoryId, tagId: r.tagId ? (tagMap[r.tagId] || null) : null }); added++;
+  });
+  return { cur, newCats, newTags, newCur, added, skipped };
+}
 function handleRestoreFile(file) { const fr = new FileReader(); fr.onload = () => previewRestore(String(fr.result)); fr.readAsText(file); }
 function previewRestore(text) {
   {
     let o; try { o = JSON.parse(text); } catch (e) { toast("Not a valid backup. Nothing changed."); return; }
     const bad = validateBackup(o); if (bad) { toast(bad + " Nothing changed."); return; }
-    pendingRestore = normalizeState(o); const dates = pendingRestore.records.map((r) => r.date).sort();
+    if (o.mergeImport) {
+      const inc = normalizeState(o), pl = planMerge(inc); pendingMerge = pl.cur; pendingRestore = null;
+      $("restorePreviewBody").innerHTML = `<p><b>Merge import</b> (nothing is removed)<br>New records: <b>${pl.added}</b> · already imported: <b>${pl.skipped}</b><br>New categories: <b>${pl.newCats}</b> · new subcategories: <b>${pl.newTags}</b><br>New currencies: <b>${pl.newCur}</b></p><p class="muted">Your current ${state.records.length} records stay. A safety copy is saved first.</p>`;
+      openDlg("restorePreviewDialog"); return;
+    }
+    pendingMerge = null; pendingRestore = normalizeState(o); const dates = pendingRestore.records.map((r) => r.date).sort();
     $("restorePreviewBody").innerHTML = `<p>Records: <b>${pendingRestore.records.length}</b><br>Categories: <b>${pendingRestore.categories.length}</b><br>Recurring rules: <b>${pendingRestore.recurringRules.length}</b><br>` +
       `Date range: <b>${esc(dates[0] || "—")} → ${esc(dates[dates.length - 1] || "—")}</b><br>Needs review: <b>${pendingRestore.quarantine.length}</b></p><p class="muted">Current data (${state.records.length} records) will be replaced. A safety copy is saved first. Your PIN settings are kept.</p>`;
     openDlg("restorePreviewDialog");
   }
 }
 function confirmRestore() {
+  if (pendingMerge) {
+    try { localStorage.setItem(APP_DATA_KEY + "_premerge_" + Date.now(), JSON.stringify(state)); } catch (e) { toast("Cannot create safety copy. Import cancelled."); return; }
+    const m = pendingMerge; pendingMerge = null;
+    if (commit(() => { state = normalizeState(m); })) { closeDlg("restorePreviewDialog"); runReconcile(); renderAll(); toast("Import complete"); } return;
+  }
   if (!pendingRestore) return;
   try { localStorage.setItem(APP_DATA_KEY + "_prerestore_" + Date.now(), JSON.stringify(state)); } catch (e) { toast("Cannot create safety copy. Restore cancelled."); return; }
   const incoming = pendingRestore; pendingRestore = null; incoming.settings.lock = clone(state.settings.lock);
   if (commit(() => { state = incoming; })) { closeDlg("restorePreviewDialog"); runReconcile(); renderAll(); toast("Backup restored"); }
 }
+function markBackup() { commit(() => { state.settings.lastBackupAt = new Date().toISOString(); }); renderBanners(); if (ui.pages) renderSettings(); }
 const backupJSON = () => JSON.stringify({ ...state, settings: { ...state.settings, lock: { enabled: false, salt: "", hash: "", recSalt: "", recHash: "" } } }, null, 2);
 function csvCell(v) { let s = String(v ?? ""); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 function exportCSV() {
@@ -1036,7 +1098,27 @@ let lk = { mode: "unlock", buf: "", first: "", after: null };
 function renderDots() { $("lockDots").innerHTML = [0, 1, 2, 3].map((i) => `<i class="${i < lk.buf.length ? "on" : ""}"></i>`).join(""); }
 function showLock(mode, title, after) {
   lk = { mode, buf: "", first: "", after: after || null }; $("lockTitle").textContent = title; $("lockMsg").textContent = "";
-  $("lockCancel").classList.toggle("hidden", mode === "unlock"); $("lockRecovery").classList.toggle("hidden", mode !== "unlock"); $("lockScreen").classList.remove("hidden"); renderDots();
+  $("lockCancel").classList.toggle("hidden", mode === "unlock"); $("lockRecovery").classList.toggle("hidden", mode !== "unlock"); $("lockBio").classList.toggle("hidden", !(mode === "unlock" && state.settings.lock.bio && bioSupported())); $("lockScreen").classList.remove("hidden"); renderDots();
+}
+/* Face ID / Touch ID via WebAuthn platform authenticator: a convenience unlock only (PIN remains the fallback). */
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))), unb64 = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
+const bioSupported = () => !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create && window.isSecureContext);
+async function bioEnroll() {
+  if (!bioSupported()) return toast("Face ID is not available in this browser.");
+  try {
+    const cred = await navigator.credentials.create({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: "My Ledger" },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: "my-ledger", displayName: "My Ledger" }, pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" }, timeout: 60000 } });
+    if (!cred) throw new Error("no credential");
+    commit(() => { state.settings.lock.bio = b64(cred.rawId); }); renderAll(); toast("Face ID turned on.");
+  } catch (e) { renderAll(); toast("Face ID setup failed: " + (e && e.name ? e.name : "error")); }
+}
+async function bioUnlock() {
+  const L = state.settings.lock; if (!L.enabled || !L.bio || !bioSupported()) return;
+  try {
+    const r = await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{ type: "public-key", id: unb64(L.bio) }], userVerification: "required", timeout: 60000 } });
+    if (r && lk.mode === "unlock") { hideLock(); renderAll(); }
+  } catch (e) { $("lockMsg").textContent = "Face ID did not work. Enter your PIN."; }
 }
 const hideLock = () => { $("lockScreen").classList.add("hidden"); lk.buf = ""; };
 async function lockKey(k) {
@@ -1101,10 +1183,11 @@ const A = {
   "toggle-swatches": (el) => { const g = $(el.dataset.target); g.classList.toggle("hidden"); el.setAttribute("aria-expanded", String(!g.classList.contains("hidden"))); },
   "open-page": (el) => openPage(el.dataset.page),
   "backup": async () => { const name = `my-ledger-backup-${todayStr()}.json`, text = backupJSON();
-    try { const f = new File([text], name, { type: "application/json" }); if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: "My Ledger backup" }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
-    download(name, text, "application/json"); },
+    try { const f = new File([text], name, { type: "application/json" }); if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: "My Ledger backup" }); markBackup(); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+    download(name, text, "application/json"); markBackup(); },
   "copy-backup": async () => { const text = backupJSON(); let ok = false;
     try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { try { const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select(); ok = document.execCommand("copy"); t.remove(); } catch (e2) { ok = false; } }
+    if (ok) markBackup();
     toast(ok ? `Backup copied (${state.records.length} records). Paste it into Notes to keep it.` : "Could not copy. Use the backup file instead."); },
   "paste-restore": () => { $("pasteBackup").value = ""; openDlg("pasteDialog"); },
   "paste-restore-go": () => { const t = $("pasteBackup").value.trim(); if (!t) return toast("Paste the backup text first."); closeDlg("pasteDialog"); previewRestore(t); },
@@ -1155,6 +1238,8 @@ const A = {
   "form-cat-select": (el) => { fm.catId = el.dataset.cat; fm.subId = ""; fm.legacy = ""; closeDlg("catPickDialog"); renderForm(); },
   "cloud-restore": async () => { if (!cloud.col) return toast("Cloud copy is not available here."); const c = await cloudPull().catch(() => null); if (!c) return toast("No cloud copy yet.");
     confirmSheet(`Replace this device's data with the cloud copy (${c.records} records, ${c.at.slice(0, 16).replace("T", " ")})?`, "Restore", () => { applyCloud(c); toast("Restored from cloud copy"); }); },
+  "banner-close": (el) => { if (el.dataset.banner === "rates") { try { localStorage.setItem(RATE_HIDE_KEY, String(Date.now())); } catch (e) { /* ignore */ } } else ui.hideUnconv = true; renderBanners(); },
+  "backup-snooze": () => { try { localStorage.setItem(BACKUP_SNOOZE_KEY, String(Date.now())); } catch (e) { /* ignore */ } renderBanners(); },
   "add-currency": () => openCurrencyAdd(),
   "currency-pick": (el) => { const code = el.dataset.code; if (curOf(code)) return; commit(() => { state.currencies.push({ id: makeId("cur"), code, symbol: curSym(code), name: curName(code), custom: true }); state.settings.removedCurrencies = (state.settings.removedCurrencies || []).filter((x) => x !== code); }); closeDlg("currencyEditDialog"); renderAll(); toast(code + " added"); },
   "currency-default": (el) => { closeSwipes(); const c = curOf(el.dataset.code); if (c) setSetting("defaultCurrencyId", c.id); },
@@ -1168,7 +1253,7 @@ const A = {
   },
   "change-pin": () => showLock("verify", "Enter current PIN", () => showLock("set1", "Create a 4-digit PIN")),
   "logout": () => { if (!state.settings.lock.enabled) return toast("Turn on App Lock first. Log out only locks the app; your data is kept."); showLock("unlock", "Enter PIN"); },
-  "lock-cancel": () => { hideLock(); renderAll(); }, "lock-recovery": () => { recoverPin(); }
+  "lock-cancel": () => { hideLock(); renderAll(); }, "lock-bio": () => { bioUnlock(); }, "lock-recovery": () => { recoverPin(); }
 };
 function catMenu(id, x, y) {
   showCtx(x, y, [
@@ -1182,7 +1267,7 @@ const segHandlers = {
   viewSeg: (s) => { ui.view = s.dataset.view; renderDetails(); },
   homeScope: (s) => { ui.homeScope = s.dataset.scope; renderHome(); },
   statsScope: (s) => { ui.statsScope = s.dataset.scope; renderStats(); },
-  formTypeSeg: (s) => { if (fm.typeLocked) return; fm.type = s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
+  formTypeSeg: (s) => { if (fm.typeLocked) return; fm.reimb = s.dataset.type === "reimb"; fm.type = fm.reimb ? "expense" : s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
   repeatKind: (s) => { if ($("repeatKind").classList.contains("locked")) return; fm.rep.kind = s.dataset.kind; renderForm(); },
   catKindSeg: (s) => { if (catDraft) { catDraft.kind = s.dataset.kind; renderCategoryEdit(); } },
   categoriesSegment: (s) => { ui.catFilter = s.dataset.filter; renderCategoriesPage(); },
@@ -1248,7 +1333,10 @@ function wire() {
   $("appearanceMode").addEventListener("change", (e) => setSetting("appearanceMode", e.target.value === "auto" ? "system" : e.target.value));
   $("fontSizeSelect").addEventListener("change", (e) => setSetting("fontSize", e.target.value));
   $("fontFormatSelect").addEventListener("change", (e) => setSetting("fontFormat", e.target.value));
+  $("backupEverySelect").addEventListener("change", (e) => { setSetting("backupEvery", e.target.value); renderBanners(); });
   $("dateFormatSelect").addEventListener("change", (e) => setSetting("dateFormat", e.target.value));
+  $("timeFormatSelect").addEventListener("change", (e) => setSetting("timeFormat", e.target.value));
+  $("bioToggle").addEventListener("change", (e) => { if (e.target.checked) bioEnroll(); else { commit(() => { state.settings.lock.bio = ""; }); renderAll(); } });
   $("lockToggle").addEventListener("change", (e) => { if (e.target.checked) showLock("set1", "Create a 4-digit PIN"); else showLock("verify", "Enter PIN to turn off", () => { commit(() => { state.settings.lock = { enabled: false, salt: "", hash: "", recSalt: "", recHash: "" }; }); renderAll(); toast("App Lock off"); }); });
   const bi = $("budgetInput"); bi.addEventListener("change", () => endBudget(true)); bi.addEventListener("blur", () => endBudget(true)); bi.addEventListener("keydown", (e) => { if (e.key === "Enter") bi.blur(); else if (e.key === "Escape") endBudget(false); });
   $("formNote").addEventListener("input", () => $("toolNote").classList.toggle("on", !!$("formNote").value.trim()));
@@ -1265,18 +1353,23 @@ function wire() {
 }
 function makeHomeIcon() {
   try {
+    if (/^https?:$/.test(location.protocol) && !/(^|\.)claude\.|usercontent/.test(location.hostname)) return null; /* hosted site uses apple-touch-icon.png */
     const c = document.createElement("canvas"); c.width = c.height = 180; const x = c.getContext("2d");
-    x.fillStyle = "#3478F6"; x.fillRect(0, 0, 180, 180); x.fillStyle = "#fff"; const r = (a, b, w, h, k) => { x.beginPath(); x.roundRect ? x.roundRect(a, b, w, h, k) : x.rect(a, b, w, h); x.fill(); };
-    r(35, 44, 110, 92, 10); x.fillStyle = "#3478F6"; x.fillRect(87, 44, 6, 92); [68, 88, 108].forEach((y) => { r(47, y, 34, 6, 3); r(99, y, 34, 6, 3); });
+    const g = x.createLinearGradient(0, 0, 0, 180); g.addColorStop(0, "#2ED0F4"); g.addColorStop(1, "#0C96D6"); x.fillStyle = g; x.fillRect(0, 0, 180, 180);
+    x.fillStyle = "rgba(0,0,0,.18)"; x.beginPath(); x.arc(92, 98, 62, 0, 7); x.fill();
+    const cg = x.createLinearGradient(0, 28, 0, 152); cg.addColorStop(0, "#FFD36B"); cg.addColorStop(1, "#F5A524"); x.fillStyle = cg; x.beginPath(); x.arc(90, 90, 62, 0, 7); x.fill();
+    x.strokeStyle = "#FFF3C9"; x.lineWidth = 5; x.beginPath(); x.arc(90, 90, 50, 0, 7); x.stroke();
+    x.fillStyle = "#B86E00"; x.font = "bold 76px Helvetica, Arial, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("$", 90, 96);
     const l = $("touchIcon"); if (l) l.href = c.toDataURL("image/png");
-  } catch (e) { /* icon is cosmetic */ }
+    return c;
+  } catch (e) { return null; }
 }
 function init() {
   loadRatesCache(); state = loadState();
   const n = new Date(), mo = { y: n.getFullYear(), m: n.getMonth() + 1 };
   ui.homeMonth = { ...mo }; ui.detailsMonth = { ...mo }; ui.statsMonth = { ...mo };
   fixUnconverted(); runReconcile(); wire(); renderAll();
-  if (state.settings.lock.enabled) showLock("unlock", "Enter PIN");
+  if (state.settings.lock.enabled) { showLock("unlock", "Enter PIN"); if (state.settings.lock.bio) bioUnlock(); }
   fetchRates(); cloudInit(); makeHomeIcon();
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol) && document.querySelector('link[rel="manifest"]')) navigator.serviceWorker.register("sw.js").catch(() => {});
 }

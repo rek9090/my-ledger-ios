@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Ledger">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" id="touchIcon" href="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">
+<link rel="apple-touch-icon" id="touchIcon" href="apple-touch-icon.png">
 <title>My Ledger</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -26,12 +26,14 @@
     <button type="button" class="numpad-key" data-pin="7">7</button><button type="button" class="numpad-key" data-pin="8">8</button><button type="button" class="numpad-key" data-pin="9">9</button>
     <button type="button" class="numpad-key op-key" data-action="lock-cancel" id="lockCancel">Cancel</button><button type="button" class="numpad-key" data-pin="0">0</button><button type="button" class="numpad-key op-key" data-pin="del" aria-label="Delete">⌫</button>
   </div>
+  <button type="button" class="lock-link hidden" id="lockBio" data-action="lock-bio">Use Face ID</button>
   <button type="button" class="lock-link hidden" id="lockRecovery" data-action="lock-recovery">Forgot PIN? Use recovery code</button>
 </div>
 
 <div id="recoveryBanner" class="banner error hidden"><span>Saved data could not be read. Nothing has been overwritten.</span><button type="button" data-action="recovery-export">Export raw</button></div>
-<div id="ratesBanner" class="banner hidden"><span id="ratesBannerText"></span><button type="button" data-action="retry-rates">Retry</button><a id="ratesReport" class="banner-link" href="#">Report</a></div>
-<div id="unconvertedBanner" class="banner hidden"><span id="unconvertedText"></span><button type="button" data-action="retry-rates">Retry</button></div>
+<div id="ratesBanner" class="banner hidden"><span id="ratesBannerText"></span><button type="button" data-action="retry-rates">Retry</button><a id="ratesReport" class="banner-link" href="#">Report</a><button type="button" class="banner-x" data-action="banner-close" data-banner="rates" aria-label="Dismiss">✕</button></div>
+<div id="backupBanner" class="banner hidden"><span id="backupBannerText"></span><button type="button" data-action="backup">Back up now</button><button type="button" class="banner-x" data-action="backup-snooze" aria-label="Dismiss">✕</button></div>
+<div id="unconvertedBanner" class="banner hidden"><span id="unconvertedText"></span><button type="button" data-action="retry-rates">Retry</button><button type="button" class="banner-x" data-action="banner-close" data-banner="unconverted" aria-label="Dismiss">✕</button></div>
 
 <div class="app-shell" id="appShell">
 
@@ -155,6 +157,8 @@
     <div class="group">
       <div class="row"><span class="set-icon" style="background:#8B5CF6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span><span class="row-label">Date Format</span>
         <select id="dateFormatSelect" aria-label="Date format"><option value="DD/MM/YYYY">DD/MM/YYYY</option><option value="MM/DD/YYYY">MM/DD/YYYY</option><option value="YYYY-MM-DD">YYYY-MM-DD</option></select></div>
+      <div class="row"><span class="set-icon" style="background:#8B5CF6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span><span class="row-label">Time Format</span>
+        <select id="timeFormatSelect" aria-label="Time format"><option value="24">24-hour</option><option value="12">12-hour (AM/PM)</option></select></div>
     </div>
 
     <div class="group">
@@ -181,6 +185,7 @@
 
     <div class="group">
       <button type="button" class="row" data-action="backup"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg></span><span class="row-label">Backup file (share)</span><span class="chev">›</span></button>
+      <div class="row"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg></span><span class="row-label">Backup reminder<small id="backupStatus"></small></span><select id="backupEverySelect" aria-label="Backup reminder"><option value="week">Every week</option><option value="fortnight">Every 2 weeks</option><option value="month">Every month</option><option value="off">Off</option></select></div>
       <button type="button" class="row" data-action="copy-backup"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg></span><span class="row-label">Backup text (copy)</span><span class="chev">›</span></button>
       <button type="button" class="row" data-action="cloud-restore"><span class="set-icon" style="background:#0A84FF"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4 4 0 0 1-.6-7.9A6 6 0 0 1 18 9.5 4.3 4.3 0 0 1 17.5 18z"/></svg></span><span class="row-label">Cloud copy — restore<small id="cloudStatus"></small></span><span class="chev">›</span></button>
       <button type="button" class="row" data-action="export-csv"><span class="set-icon" style="background:#36BFA6"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></span><span class="row-label">Export CSV</span><span class="chev">›</span></button>
@@ -213,6 +218,7 @@
     <div class="group-title">Security</div>
     <div class="group">
       <div class="row"><span class="row-label">App Lock<small id="lockState">Off</small></span><input type="checkbox" class="switch" id="lockToggle" aria-label="App lock"></div>
+      <div class="row hidden" id="bioRow"><span class="row-label">Face ID<small id="bioState">Off</small></span><input type="checkbox" class="switch" id="bioToggle" aria-label="Face ID"></div>
       <button type="button" class="row" data-action="change-pin" id="changePinRow"><span class="row-label">Change PIN</span><span class="chev">›</span></button>
       <div class="row"><span class="row-label">Face ID<small>Available in the iOS app</small></span><input type="checkbox" class="switch" disabled aria-label="Face ID"></div>
     </div>
@@ -278,7 +284,7 @@
     <div class="dialog-header"><div class="hdr-main"><h2 id="formTitle">Add Record</h2><button type="button" class="cat-pill" id="formCatBtn" data-action="form-cat-pick"></button></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
     <div class="dialog-body">
       <div class="form-pad hidden" id="formNameRow"><input type="text" class="text-input" id="formName" maxlength="20" placeholder="Template name" aria-label="Template name"></div>
-      <div class="segmented form-pad" id="formTypeSeg"><button type="button" class="segment active" data-type="expense">Expense</button><button type="button" class="segment" data-type="income">Income</button></div>
+      <div class="segmented form-pad" id="formTypeSeg"><button type="button" class="segment active" data-type="expense">Expense</button><button type="button" class="segment" data-type="income">Income</button><button type="button" class="segment" data-type="reimb">Reimb.</button></div>
       <div class="numpad-display"><div class="numpad-expression" id="numpadExpression"></div><div class="numpad-amount" id="numpadAmount">0</div><div class="conversion-hint" id="conversionHint"></div></div>
 
       <div class="tool-row">
@@ -347,7 +353,7 @@
     <div id="dpDayView"><div class="dp-weekdays"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div><div class="dp-grid" id="dpGrid"></div></div>
     <div class="dp-month-grid hidden" id="dpMonthGrid"></div>
     <div class="dp-year-grid hidden" id="dpYearGrid"></div>
-    <div class="dp-time hidden" id="dpTimeRow"><span>Time</span><div class="wheel" id="wheel" aria-label="Time"><div class="wheel-col" id="whH"></div><span class="wheel-sep">:</span><div class="wheel-col" id="whM"></div><div class="wheel-band"></div></div><input type="hidden" id="dpTime" value="00:00"></div>
+    <div class="dp-time hidden" id="dpTimeRow"><span>Time</span><div class="wheel" id="wheel" aria-label="Time"><div class="wheel-col" id="whH"></div><span class="wheel-sep">:</span><div class="wheel-col" id="whM"></div><div class="wheel-col wheel-ap" id="whP"></div><div class="wheel-band"></div></div><input type="hidden" id="dpTime" value="00:00"></div>
   </div>
   <div class="dialog-actions">
     <button type="button" class="button button-secondary" id="dpClearBtn" data-action="dp-clear">Clear</button>
