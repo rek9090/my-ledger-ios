@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.10";
+const APP_VERSION = "1.11";
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
@@ -64,7 +64,8 @@ const toNum = (v) => (v === null || v === undefined || v === "" || typeof v === 
 const round2 = (x) => Math.round((x + Number.EPSILON) * 100) / 100;
 const fmtNum = (x) => Number(x).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtShort = (x) => { const a = Math.abs(x); return a >= 1e6 ? (x / 1e6).toFixed(1) + "M" : a >= 1e4 ? (x / 1e3).toFixed(1) + "k" : a >= 1000 ? Math.round(x) + "" : a === 0 ? "0" : String(round2(x)); };
-const calAmt = (x) => { const t = fmtShort(x), i = t.indexOf("."); return i < 0 ? `<b class="ip">${t}</b><i class="fp"></i>` : `<b class="ip">${t.slice(0, i)}</b><i class="fp">${t.slice(i)}</i>`; };
+const calParts = (x) => { const t = fmtShort(x), i = t.indexOf("."); return i < 0 ? [t, ""] : [t.slice(0, i), t.slice(i)]; };
+const calAmts = (i, e) => `<span class="cal-amts"><b class="ip ci">${i[0]}</b><i class="fp ci">${i[1]}</i><b class="ip ce">${e[0]}</b><i class="fp ce">${e[1]}</i></span>`;
 const monthLabel = (y, m) => MONTHS[m - 1] + " " + y;
 const safeSymbol = (s) => String(s ?? "").replace(/[<>"'&]/g, "").slice(0, 4);
 const safeColor = (c) => (/^#[0-9a-f]{6}$/i.test(c || "") ? c : "#8e8e93");
@@ -710,7 +711,7 @@ function renderCalendar(mo) {
   let h = ""; for (let i = 0; i < first; i++) h += `<span class="cal-day empty"></span>`;
   for (let d = 1; d <= days; d++) {
     const ds = ymd(mo.y, mo.m, d), s = sumRecords(by[ds] || []), exp = s.net;
-    h += `<button type="button" class="cal-day${ds === today ? " today" : ""}" data-action="cal-day" data-date="${ds}"><span class="n">${d}</span><span class="cal-inc">${s.inc > 0 ? (state.settings.hideIncome ? "•••" : calAmt(s.inc)) : ""}</span><span class="cal-exp">${exp > 0 ? calAmt(exp) : ""}</span></button>`;
+    h += `<button type="button" class="cal-day${ds === today ? " today" : ""}" data-action="cal-day" data-date="${ds}"><span class="n">${d}</span>${calAmts(s.inc > 0 ? (state.settings.hideIncome ? ["•••", ""] : calParts(s.inc)) : ["", ""], exp > 0 ? calParts(exp) : ["", ""])}</button>`;
   }
   $("calGrid").innerHTML = h;
 }
