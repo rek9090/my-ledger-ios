@@ -168,7 +168,8 @@ h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -.5px; } h2 {
 .row:first-child, .accordion .row:first-child { border-top: none; }
 .row-label { flex: 1; min-width: 0; font-size: 15px; } .row-label small { display: block; font-size: 12px; color: var(--muted); }
 .row-value { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
-.row select { border: none; background: transparent; color: var(--muted); text-align: right; max-width: 55%; font-size: 14px; }
+.row select { border: none; background: transparent; color: var(--muted); text-align: right; text-align-last: right; direction: rtl; -webkit-appearance: none; appearance: none; padding: 0; margin: 0; max-width: 55%; font-size: 14px; line-height: 1.3; }
+.row select option { direction: ltr; }
 .row-input { flex: 1; min-width: 0; text-align: right; border: none; background: transparent; color: var(--muted); font-size: 15px; }
 .set-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 16px; flex-shrink: 0; }
 .row-minus { width: 22px; height: 22px; border-radius: 50%; background: var(--negative); color: #fff; display: grid; place-items: center; font-size: 16px; font-weight: 700; line-height: 1; flex-shrink: 0; }
@@ -288,3 +289,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .wheel-ap { display: none; width: 52px; }
 .wheel.w12 { width: 214px; }
 .wheel.w12 .wheel-ap { display: block; }
+
+.sticky-top { position: sticky; top: 0; z-index: 30; background: var(--bg); padding: calc(var(--sat) + 10px) 0 2px; margin: calc(-1 * (var(--sat) + 10px)) 0 0; }
+.sticky-top .page-head { margin: 0 0 8px; }
+.sticky-top .period-bar { margin-bottom: 8px; }

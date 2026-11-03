@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.07";
+const APP_VERSION = "1.08";
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
@@ -84,7 +84,7 @@ const ui = { tab: "home", pages: [], homeMonth: null, detailsMonth: null, statsM
 
 function defaultSettings() {
   return { defaultCurrencyId: "cur-sgd", dateFormat: "DD/MM/YYYY", timeFormat: "24", appearanceMode: "system", skinColor: "classic", themeColor: "#3478F6",
-    hideIncome: false, backupEvery: "week", lastBackupAt: "", removedCurrencies: [], userName: "Alex", userId: "", userAvatar: "", fontSize: "medium", fontFormat: "system", monthlyBudget: 1000,
+    hideIncome: false, backupEvery: "week", lastBackupAt: "", removedCurrencies: [], userName: "Rek", userId: "", userAvatar: "", fontSize: "medium", fontFormat: "system", monthlyBudget: 1000,
     homeExpanded: { expense: true, income: false }, lock: { enabled: false, salt: "", hash: "", recSalt: "", recHash: "" } };
 }
 function createDefaultState() {
@@ -101,7 +101,7 @@ function normalizeCategories(list) {
       names.add(name.toLowerCase());
       tags.push({ id: o.id || makeId("tag"), name, order: toNum(o.order) ?? j, archived: !!o.archived });
     });
-    return { id: String(c.id), kind: c.kind === "income" || c.kind === "expense" ? c.kind : null, name: String(c.name ?? "Untitled"), icon: c.icon || "🏷️", color: c.color || "#3478F6", order: toNum(c.order) ?? i, archived: !!c.archived, tags };
+    return { id: String(c.id), kind: c.kind === "income" || c.kind === "expense" ? c.kind : null, name: String(c.name ?? "Untitled"), icon: typeof c.icon === "string" ? c.icon : "🏷️", color: c.color || "#3478F6", order: toNum(c.order) ?? i, archived: !!c.archived, tags };
   });
 }
 /* Category kind (Expense/Income) for legacy data: Salary is income, otherwise inferred from the records already filed under it. */
@@ -128,7 +128,7 @@ function normalizeState(data) {
   if (!["system", "rounded", "serif", "mono", "script"].includes(out.settings.fontFormat)) out.settings.fontFormat = "system";
   const he = out.settings.homeExpanded; out.settings.homeExpanded = { expense: !(he && he.expense === false), income: !!(he && he.income) };
   const lk = out.settings.lock; out.settings.lock = { enabled: !!(lk && lk.enabled && lk.hash), salt: String(lk?.salt || ""), hash: String(lk?.hash || ""), recSalt: String(lk?.recSalt || ""), recHash: String(lk?.recHash || ""), bio: String(lk?.bio || "") };
-  out.settings.userName = String(out.settings.userName || "Alex").slice(0, 20); out.settings.userId = String(out.settings.userId || "").slice(0, 24);
+  out.settings.userName = String(!out.settings.userName || out.settings.userName === "Alex" ? "Rek" : out.settings.userName).slice(0, 20); out.settings.userId = String(out.settings.userId || "").slice(0, 24);
   out.quarantine = Array.isArray(data.quarantine) ? data.quarantine.slice() : [];
   const rem = Array.isArray(out.settings.removedCurrencies) ? out.settings.removedCurrencies.filter((x) => typeof x === "string") : []; out.settings.removedCurrencies = rem;
   out.currencies = out.currencies.filter((c) => !rem.includes(c.code));
@@ -155,7 +155,7 @@ function normalizeState(data) {
       currencySymbol: safeSymbol(r.currencySymbol) || (out.currencies.find((c) => c.code === code)?.symbol || code), exchangeRate: toNum(r.exchangeRate),
       date: r.date, time: /^\d{2}:\d{2}$/.test(r.time || "") ? r.time : "00:00", note: String(r.note ?? ""),
       categoryNameSnapshot: r.categoryNameSnapshot || cat?.name || "Unassigned", tag, tagNameSnapshot: r.tagNameSnapshot || tag,
-      tagId: r.tagId || cat?.tags.find((t) => t.name === tag)?.id || null, isRefund, isReimb: !!r.isReimb && isRefund && !r.originalRecordId, originalRecordId: r.originalRecordId || null });
+      tagId: r.tagId || cat?.tags.find((t) => t.name === tag)?.id || null, isRefund, isReimb: !!r.isReimb && isRefund, originalRecordId: r.originalRecordId || null });
   });
   out.records = records;
   inferKinds(out.categories, records);
@@ -291,7 +291,7 @@ function sumRecords(list) {
   }
   return { inc, exp, ref, unc, net: Math.max(0, exp - ref) };
 }
-const inPeriod = (r, scope, mo) => r.date.startsWith(scope === "year" ? mo.y + "-" : `${mo.y}-${pad(mo.m)}`);
+const inPeriod = (r, scope, mo) => scope === "all" || r.date.startsWith(scope === "year" ? mo.y + "-" : `${mo.y}-${pad(mo.m)}`);
 const periodRecords = (scope, mo, list) => (list || shownRecords()).filter((r) => inPeriod(r, scope, mo));
 function streakDays() {
   const days = new Set(state.records.map((r) => r.date)); let d = todayStr(); if (!days.has(d)) d = addDays(d, -1);
@@ -517,26 +517,30 @@ function fmtTime(t) {
   const h = +m[1]; return (h % 12 || 12) + ":" + m[2] + " " + (h < 12 ? "AM" : "PM");
 }
 let wheelBound = false;
+const WREP = 7, WMID = 3; /* looping wheels: items repeated, re-centred after each settle so scrolling never stops at 0 or 23 */
+const wheelN = (id) => (id === "whM" ? 60 : id === "whP" ? 2 : is12() ? 12 : 24);
+const wheelIdx = (id) => { const n = wheelN(id); return ((Math.round($(id).scrollTop / 36) % n) + n) % n; };
 function readWheel() {
-  const idx = (id) => Math.max(0, Math.round($(id).scrollTop / 36)), m = Math.min(59, idx("whM"));
-  let h;
-  if (is12()) { const hh = Math.min(11, idx("whH")) + 1, pm = Math.min(1, idx("whP")) === 1; h = (hh % 12) + (pm ? 12 : 0); } else h = Math.min(23, idx("whH"));
+  const m = wheelIdx("whM"); let h;
+  if (is12()) { const hh = wheelIdx("whH") + 1, pm = wheelIdx("whP") === 1; h = (hh % 12) + (pm ? 12 : 0); } else h = wheelIdx("whH");
   $("dpTime").value = pad(h) + ":" + pad(m);
 }
+function recenter(id) { if (id === "whP") return; const n = wheelN(id), raw = Math.round($(id).scrollTop / 36); if (raw < n * 2 || raw >= n * (WMID + 1)) $(id).scrollTop = (n * WMID + wheelIdx(id)) * 36; }
 function fillWheel() {
   const f = is12() ? "12" : "24"; $("wheel").classList.toggle("w12", f === "12");
   if ($("wheel").dataset.f !== f) {
     $("wheel").dataset.f = f;
-    $("whH").innerHTML = (f === "12" ? Array.from({ length: 12 }, (_, i) => `<div>${i + 1}</div>`) : Array.from({ length: 24 }, (_, i) => `<div>${pad(i)}</div>`)).join("");
-    $("whM").innerHTML = Array.from({ length: 60 }, (_, i) => `<div>${pad(i)}</div>`).join(""); $("whP").innerHTML = "<div>AM</div><div>PM</div>";
+    const lab = (id, n, fn) => { $(id).innerHTML = Array.from({ length: n * WREP }, (_, i) => `<div>${fn(i % n)}</div>`).join(""); };
+    lab("whH", wheelN("whH"), (i) => (f === "12" ? String(i + 1) : pad(i))); lab("whM", 60, pad); $("whP").innerHTML = "<div>AM</div><div>PM</div>";
   }
-  if (wheelBound) return; wheelBound = true; let tm = null;
-  ["whH", "whM", "whP"].forEach((id) => $(id).addEventListener("scroll", () => { clearTimeout(tm); tm = setTimeout(readWheel, 90); }));
+  if (wheelBound) return; wheelBound = true; const tm = {};
+  ["whH", "whM", "whP"].forEach((id) => $(id).addEventListener("scroll", () => { clearTimeout(tm[id]); tm[id] = setTimeout(() => { recenter(id); readWheel(); }, 90); }));
 }
 function setWheel(v) {
   const [h, m] = String(v || "00:00").split(":").map(Number), hh = h || 0;
-  $("whH").scrollTop = (is12() ? ((hh % 12) || 12) - 1 : hh) * 36; $("whM").scrollTop = (m || 0) * 36; $("whP").scrollTop = hh >= 12 ? 36 : 0;
+  $("whH").scrollTop = (wheelN("whH") * WMID + (is12() ? ((hh % 12) || 12) - 1 : hh)) * 36; $("whM").scrollTop = (60 * WMID + (m || 0)) * 36; $("whP").scrollTop = hh >= 12 ? 36 : 0;
 }
+
 function renderDP() {
   const { y, m, view, o } = DP, sel = isYMD(o.value) ? parseYMD(o.value) : null, today = todayStr();
   $("dpDayView").classList.toggle("hidden", view !== "day"); $("dpMonthGrid").classList.toggle("hidden", view !== "month"); $("dpYearGrid").classList.toggle("hidden", view !== "year");
@@ -600,7 +604,7 @@ function renderAvatar() {
 }
 const eyeSync = () => ["homeEye", "detailsEye"].forEach((id) => { $(id).classList.toggle("off", !!state.settings.hideIncome); $(id).setAttribute("aria-pressed", String(!!state.settings.hideIncome)); });
 const moOf = (scope, key) => ui[key];
-const periodLabel = (scope, mo) => (scope === "year" ? String(mo.y) : monthLabel(mo.y, mo.m));
+const periodLabel = (scope, mo) => (scope === "all" ? "All time" : scope === "year" ? String(mo.y) : monthLabel(mo.y, mo.m));
 const setSeg = (id, attr, val) => document.querySelectorAll(`#${id} .segment`).forEach((b) => b.classList.toggle("active", b.dataset[attr] === val));
 
 function renderHome() {
@@ -705,27 +709,28 @@ function bars(vals, labels, colors) {
   return h + "</svg>";
 }
 function renderStats() {
-  const sc = ui.statsScope, mo = ui.statsMonth, hide = state.settings.hideIncome, recs = periodRecords(sc, mo), tot = sumRecords(recs), isY = sc === "year";
+  const sc = ui.statsScope, mo = ui.statsMonth, hide = state.settings.hideIncome, recs = periodRecords(sc, mo), tot = sumRecords(recs), isY = sc === "year", isA = sc === "all";
+  document.querySelectorAll("#page-stats .period-bar .icon-button").forEach((b) => { b.style.visibility = isA ? "hidden" : ""; });
   $("statsLabel").textContent = periodLabel(sc, mo); setSeg("statsScope", "scope", sc);
-  const kx = rateOf(dispCode()) || 1, used = tot.net * kx, budget = (toNum(state.settings.monthlyBudget) || 0) * (isY ? 12 : 1), pct = budget > 0 ? Math.round((used / budget) * 100) : 0, left = budget - used;
-  $("budgetCard").querySelector(".eyebrow").textContent = isY ? "Yearly Budget (monthly × 12)" : "Monthly Budget";
+  const kx = rateOf(dispCode()) || 1, used = tot.net * kx, firstD = state.records.map((r) => r.date).sort()[0], nowD = new Date(), spanM = firstD ? Math.max(1, (nowD.getFullYear() - +firstD.slice(0, 4)) * 12 + nowD.getMonth() + 1 - +firstD.slice(5, 7) + 1) : 1, budget = (toNum(state.settings.monthlyBudget) || 0) * (isA ? spanM : isY ? 12 : 1), pct = budget > 0 ? Math.round((used / budget) * 100) : 0, left = budget - used;
+  $("budgetCard").querySelector(".eyebrow").textContent = isA ? `Budget (monthly × ${spanM})` : isY ? "Yearly Budget (monthly × 12)" : "Monthly Budget";
   $("budgetUsed").textContent = fmtNum(used); $("budgetTotal").textContent = budget > 0 ? fmtNum(budget) : "Set budget";
   const fill = $("budgetBarFill"); fill.style.width = Math.min(100, pct) + "%"; fill.className = "budget-bar-fill" + (pct > 100 ? " over" : pct >= 80 ? " warn" : "");
   $("budgetPercent").textContent = budget > 0 ? `${pct}% Used` : "Tap the amount to set a budget";
   const bl = $("budgetLeft"); bl.className = "budget-left" + (left < 0 ? " over" : ""); bl.textContent = budget > 0 ? (left < 0 ? `Over by ${fmtNum(-left)}` : `${fmtNum(left)} Left`) : "";
   const now = new Date(), cur = isY ? mo.y === now.getFullYear() : (mo.y === now.getFullYear() && mo.m === now.getMonth() + 1);
   const total = isY ? ((mo.y % 4 === 0 && mo.y % 100 !== 0) || mo.y % 400 === 0 ? 366 : 365) : dim(mo.y, mo.m);
-  const dayN = cur ? (isY ? Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(mo.y, 0, 1)) / 864e5) + 1 : now.getDate()) : total;
-  { const n = streakDays(); $("kpiStreak").textContent = `Streak ${n} ${n === 1 ? "day" : "days"}`; } $("kpiRecords").textContent = `${recs.length} / ${state.records.length}`; $("kpiRecLabel").textContent = (isY ? "Year" : "Month") + " / All records"; $("kpiAvg").textContent = fmtBaseNum(tot.net / Math.max(1, dayN));
+  const dayN = isA ? (firstD ? Math.floor((new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate()) - new Date(+firstD.slice(0, 4), +firstD.slice(5, 7) - 1, +firstD.slice(8, 10))) / 864e5) + 1 : 1) : cur ? (isY ? Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(mo.y, 0, 1)) / 864e5) + 1 : now.getDate()) : total;
+  { const n = streakDays(); $("kpiStreak").textContent = `Streak ${n} ${n === 1 ? "day" : "days"}`; } $("kpiRecords").textContent = `${recs.length} / ${state.records.length}`; $("kpiRecLabel").textContent = isA ? "All time" : (isY ? "Year" : "Month") + " / All records"; $("kpiAvg").textContent = fmtBaseNum(tot.net / Math.max(1, dayN));
   const net = tot.inc - tot.net, kn = $("kpiNet"); kn.textContent = hide ? MASK : fmtBaseNum(net); kn.className = hide ? "" : net < 0 ? "negative" : "positive";
   const by = {}; recs.forEach((r) => { if (r.type !== "expense" || r.isRefund || r.currencyCode === GEN) return; const b = baseOf(r); if (b === null) return; const k = r.categoryId || r.categoryNameSnapshot; (by[k] = by[k] || { name: r.categoryNameSnapshot, col: catOf(r.categoryId)?.color, v: 0 }).v += b; });
   const rows = Object.values(by).sort((a, b) => b.v - a.v), sum = rows.reduce((s, x) => s + x.v, 0);
   $("statsCategory").innerHTML = rows.map((x) => `<div class="mb"><div style="display:flex;justify-content:space-between;font-size:13px"><span>${esc(x.name)}</span><b>${esc(fmtBase(x.v))} · ${Math.round((x.v / sum) * 100)}%</b></div><div class="budget-bar" style="margin:4px 0 0"><div class="budget-bar-fill" style="width:${((x.v / sum) * 100).toFixed(1)}%;background:${safeColor(x.col)}"></div></div></div>`).join("") || `<div class="empty-state">No spending in this period</div>`;
   {
     const k = rateOf(dispCode()) || 1, all = shownRecords(), e = [], inc = [], labels = [];
-    if (!isY) for (let m = 1; m <= 12; m++) { const s = sumRecords(periodRecords("month", { y: mo.y, m }, all)); e.push(s.net * k); inc.push(s.inc * k); labels.push(MONTHS[m - 1].slice(0, 3)); }
-    else for (let y = mo.y - 4; y <= mo.y; y++) { const s = sumRecords(periodRecords("year", { y, m: 1 }, all)); e.push(s.net * k); inc.push(s.inc * k); labels.push(String(y)); }
-    const un = isY ? "Yearly" : "Monthly"; $("statsTrendTitle").textContent = hide ? un + " Spending" : un + " Income vs Expense";
+    if (!isY && !isA) for (let m = 1; m <= 12; m++) { const s = sumRecords(periodRecords("month", { y: mo.y, m }, all)); e.push(s.net * k); inc.push(s.inc * k); labels.push(MONTHS[m - 1].slice(0, 3)); }
+    else for (let y = (isA ? nowD.getFullYear() : mo.y) - 4; y <= (isA ? nowD.getFullYear() : mo.y); y++) { const s = sumRecords(periodRecords("year", { y, m: 1 }, all)); e.push(s.net * k); inc.push(s.inc * k); labels.push(String(y)); }
+    const un = isY || isA ? "Yearly" : "Monthly"; $("statsTrendTitle").textContent = hide ? un + " Spending" : un + " Income vs Expense";
     $("statsTrend").innerHTML = bars(hide ? [e] : [inc, e], labels, hide ? ["var(--accent)"] : ["var(--positive)", "var(--negative)"]);
   }
 }
@@ -735,7 +740,7 @@ function renderSwatches(id, colors, selected) {
 }
 function renderSettings() {
   const s = state.settings;
-  $("appearanceMode").value = s.appearanceMode === "system" ? "auto" : s.appearanceMode; $("fontSizeSelect").value = s.fontSize; $("fontFormatSelect").value = s.fontFormat; $("backupEverySelect").value = s.backupEvery in BACKUP_DAYS ? s.backupEvery : "off"; $("backupStatus").textContent = s.lastBackupAt ? "Last backup " + s.lastBackupAt.slice(0, 10) : "Never backed up";
+  $("appearanceMode").value = s.appearanceMode === "system" ? "auto" : s.appearanceMode; $("fontSizeSelect").value = s.fontSize; $("fontFormatSelect").value = s.fontFormat; $("backupEverySelect").value = s.backupEvery in BACKUP_DAYS ? s.backupEvery : "off"; $("backupStatus").textContent = s.lastBackupAt && Number.isFinite(Date.parse(s.lastBackupAt)) ? (() => { const d = new Date(s.lastBackupAt); return "Last backup " + fmtDate(ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())) + " " + fmtTime(pad(d.getHours()) + ":" + pad(d.getMinutes())); })() : "Never backed up"; $("backupBody").classList.toggle("hidden", !ui.backupOpen); $("backupHead").setAttribute("aria-expanded", String(!!ui.backupOpen));
   $("dateFormatSelect").value = s.dateFormat; $("timeFormatSelect").value = s.timeFormat === "12" ? "12" : "24";
   renderSwatches("accentSwatches", ACCENTS, s.themeColor); renderSwatches("skinCool", SKINS_COOL, s.skinColor); renderSwatches("skinWarm", SKINS_WARM, s.skinColor);
   $("accentPreview").style.background = safeColor(s.themeColor); $("skinPreview").style.background = (SKINS.find((k) => k[0] === s.skinColor) || SKINS[0])[1];
@@ -844,18 +849,18 @@ function openForm(o = {}) {
   let amt = base && toNum(base.amount) ? base.amount : 0, catId = orig ? orig.categoryId : base ? base.categoryId : preCat ? preCat.id : sortedCats(type)[0]?.id || null;
   if (orig) amt = round2(orig.amount - refundsOf(orig.id, null).reduce((s, r) => s + r.amount, 0));
   const sub = resolveSub(catId, orig ? { tag: orig.tag, tagId: orig.tagId } : base && base.categoryId === catId ? base : null);
-  Object.assign(fm, { catOpen: false, mode, ex, type, reimb: mode === "record" && !orig && (ex ? !!ex.isReimb : !!o.reimb), currency: orig ? orig.currencyCode : base ? base.currencyCode : dispCode(), catId, subId: sub.subId, legacy: sub.legacy, photo: base && base.photo ? base.photo : "", refundOf: orig ? orig.id : (ex && ex.isRefund ? ex.originalRecordId : null),
-    date: mode === "record" ? (ex ? ex.date : todayStr()) : mode === "rule" ? (ex ? ex.startDate : todayStr()) : todayStr(), time: mode === "record" && ex ? ex.time : nowTime(), panel: "", typeLocked: !!orig || (mode === "record" && !!ex && !!ex.isRefund && !ex.isReimb) || (mode === "rule" && !!ex),
+  Object.assign(fm, { catOpen: false, mode, ex, type, reimb: mode === "record" && (ex ? !!ex.isReimb : !!(orig && o.reimb)), currency: orig ? orig.currencyCode : base ? base.currencyCode : dispCode(), catId, subId: sub.subId, legacy: sub.legacy, photo: base && base.photo ? base.photo : "", refundOf: orig ? orig.id : (ex && ex.isRefund ? ex.originalRecordId : null),
+    date: mode === "record" ? (ex ? ex.date : todayStr()) : mode === "rule" ? (ex ? ex.startDate : todayStr()) : todayStr(), time: mode === "record" && ex ? ex.time : nowTime(), panel: "", typeLocked: !!orig || (mode === "record" && !!ex && !!ex.isRefund) || (mode === "rule" && !!ex),
     rep: ex && mode === "rule" ? { on: true, kind: ex.kind, interval: ex.interval, freq: ex.freq, total: ex.installmentTotal || "", end: ex.endDate || "" } : { on: false, kind: "recurring", interval: 1, freq: "monthly", total: "", end: "" } });
   $("formNote").value = orig ? "" : base && base.note ? base.note : ""; if ($("formNote").value) fm.panel = "note";
   $("formName").value = mode === "template" && ex ? ex.label : "";
-  $("formTitle").textContent = mode === "template" ? (ex ? "Edit Template" : "New Template") : mode === "rule" ? (ex ? "Edit Recurring" : "New Recurring") : ex ? "Edit Record" : orig ? "Refund" : o.copyOf ? "Copy Record" : "Add Record";
+  $("formTitle").textContent = mode === "template" ? (ex ? "Edit Template" : "New Template") : mode === "rule" ? (ex ? "Edit Recurring" : "New Recurring") : ex ? "Edit Record" : orig ? (o.reimb ? "Reimbursement" : "Refund") : o.copyOf ? "Copy Record" : "Add Record";
   $("opPM").textContent = "+/−"; $("opMD").textContent = "×/÷"; $("formError").classList.add("hidden");
   calcReset(amt > 0 ? amt : 0); renderForm(); openDlg("formDialog");
 }
 function renderForm() {
   const isRec = fm.mode === "record", isTpl = fm.mode === "template", isRule = fm.mode === "rule", rp = fm.rep, ex = fm.ex;
-  $("formNameRow").classList.toggle("hidden", !isTpl); setSeg("formTypeSeg", "type", fm.reimb ? "reimb" : fm.type); document.querySelector("#formTypeSeg [data-type=reimb]").classList.toggle("hidden", !isRec || !!fm.refundOf); $("formTypeSeg").classList.toggle("locked", fm.typeLocked);
+  $("formNameRow").classList.toggle("hidden", !isTpl); setSeg("formTypeSeg", "type", fm.type); $("formTypeSeg").classList.toggle("locked", fm.typeLocked);
   $("toolDate").classList.toggle("hidden", isTpl); $("toolPhoto").classList.toggle("hidden", !isRec); $("toolRepeat").classList.toggle("hidden", !(isRec && !fm.refundOf && !fm.reimb && !(ex && (ex.isRefund || ex.recurringRuleId))));
   $("toolNote").classList.toggle("on", !!$("formNote").value.trim()); $("toolPhoto").classList.toggle("on", !!fm.photo); $("toolRepeat").classList.toggle("on", rp.on && !isRule);
   $("toolInfo").textContent = isRec ? `${fmtDate(fm.date)} ${fmtTime(fm.time)}` : isRule ? "Starts " + fmtDate(fm.date) : "";
@@ -918,7 +923,7 @@ function saveForm() {
   const rec = { ...(ex || { createdAt: now, recurringRuleId: null }), id: ex ? ex.id : makeId("rec"), type: fm.refundOf || fm.reimb ? "income" : fm.type, amount, currencyCode: code,
     currencySymbol: ex && ex.currencyCode === code && ex.currencySymbol ? ex.currencySymbol : symOf(code), exchangeRate: rate, baseAmount: base, categoryId: cat.id,
     categoryNameSnapshot: same && ex.categoryNameSnapshot ? ex.categoryNameSnapshot : cat.name, tag: sf.tag, tagId: sf.tagId, tagNameSnapshot: sf.snap, date: fm.date, time: fm.time || "00:00",
-    note, photo: fm.photo || "", isRefund: fm.refundOf ? true : ex ? (ex.isRefund && !ex.isReimb) || !!fm.reimb : !!fm.reimb, isReimb: !fm.refundOf && !!fm.reimb, originalRecordId: ex ? ex.originalRecordId || null : (fm.refundOf || null), updatedAt: now };
+    note, photo: fm.photo || "", isRefund: !!fm.refundOf || (ex ? !!ex.isRefund : false), isReimb: !!fm.reimb && (!!fm.refundOf || !!(ex && ex.isRefund)), originalRecordId: ex ? ex.originalRecordId || null : (fm.refundOf || null), updatedAt: now };
   if (est) rec.rateEst = true; else delete rec.rateEst;
   if (rule) Object.assign(rec, { recurringRuleId: rule.id, ruleKey: rule.generatedMonths[0], repeatKind: rule.kind, repeatFreq: rule.freq, installmentIndex: 1, installmentTotal: rule.installmentTotal });
   const ok = commit(() => { if (rule) state.recurringRules.push(rule); if (ex) { const i = state.records.findIndex((r) => r.id === ex.id); state.records[i] = rec; } else state.records.push(rec); });
@@ -964,10 +969,10 @@ function openDetail(id) {
   let h = `<div class="group inset">${row("Amount", isHiddenInc(r) ? MASK : (r.type === "income" && !r.isRefund ? "+" : "−") + fmtRec(r))}${r.currencyCode !== BASE && r.currencyCode !== GEN && !isHiddenInc(r) ? row("In SGD", b === null ? "Rate unavailable" : symOf(BASE) + fmtNum(b)) : ""}${r.currencyCode === GEN ? row("Totals", "Not counted (generic currency)") : ""}` +
     row("Type", r.isReimb ? "Reimbursement" : r.isRefund ? "Refund" : r.type === "income" ? "Income" : "Expense") + row("Category", r.categoryNameSnapshot + (cat && cat.name !== r.categoryNameSnapshot ? ` (now ${cat.name})` : "")) +
     (r.tagNameSnapshot ? row("Subcategory", r.tagNameSnapshot) : "") + row("Date", fmtDate(r.date) + " " + fmtTime(r.time)) + (r.note ? row("Note", r.note) : "") +
-    (bd && !r.isRefund ? row("Repeat", bd.t) : "") + (orig ? row("Refund of", fmtRec(orig) + " · " + fmtDate(orig.date)) : "") + (rf.length ? row("Refunded", symOf(r.currencyCode) + fmtNum(rf.reduce((s, x) => s + x.amount, 0))) : "") + `</div>`;
+    (bd && !r.isRefund ? row("Repeat", bd.t) : "") + (orig ? row(r.isReimb ? "Reimbursed" : "Refund of", fmtRec(orig) + " · " + fmtDate(orig.date)) : "") + (rf.length ? row("Refunded", symOf(r.currencyCode) + fmtNum(rf.reduce((s, x) => s + x.amount, 0))) : "") + `</div>`;
   if (r.photo && r.photo.startsWith("data:image/")) h += `<div class="form-field"><img src="${esc(r.photo)}" alt="Attachment" style="max-width:100%;border-radius:10px"></div>`;
   h += `<div class="dialog-actions" style="flex-wrap:wrap"><button type="button" class="button button-secondary" data-action="rec-edit" data-id="${esc(r.id)}">Edit</button>` +
-    (r.type === "expense" && !r.isRefund ? `<button type="button" class="button button-secondary" data-action="rec-refund" data-id="${esc(r.id)}">Refund</button>` : "") +
+    (r.type === "expense" && !r.isRefund ? `<button type="button" class="button button-secondary" data-action="rec-refund" data-id="${esc(r.id)}">Refund</button><button type="button" class="button button-secondary" data-action="rec-reimb" data-id="${esc(r.id)}">Reimburse</button>` : "") +
     `<button type="button" class="button button-secondary" data-action="rec-copy" data-id="${esc(r.id)}">Copy</button><button type="button" class="button button-danger" data-action="rec-delete" data-id="${esc(r.id)}">Delete</button></div>`;
   $("detailBody").innerHTML = h; openDlg("detailDialog");
 }
@@ -1051,8 +1056,8 @@ function previewRestore(text) {
 function confirmRestore() {
   if (pendingMerge) {
     try { localStorage.setItem(APP_DATA_KEY + "_premerge_" + Date.now(), JSON.stringify(state)); } catch (e) { toast("Cannot create safety copy. Import cancelled."); return; }
-    const m = pendingMerge; pendingMerge = null;
-    if (commit(() => { state = normalizeState(m); })) { closeDlg("restorePreviewDialog"); runReconcile(); renderAll(); toast("Import complete"); } return;
+    const m = pendingMerge; pendingMerge = null; m.settings.tidy108 = false;
+    if (commit(() => { state = normalizeState(m); })) { tidy108(); closeDlg("restorePreviewDialog"); runReconcile(); renderAll(); toast("Import complete"); } return;
   }
   if (!pendingRestore) return;
   try { localStorage.setItem(APP_DATA_KEY + "_prerestore_" + Date.now(), JSON.stringify(state)); } catch (e) { toast("Cannot create safety copy. Restore cancelled."); return; }
@@ -1149,7 +1154,7 @@ async function recoverPin() {
 
 /* ===== Event handling ===== */
 let lpTimer = null, lpFired = 0;
-const shiftPeriod = (key, scopeKey, k) => { const mo = ui[key]; ui[key] = ui[scopeKey] === "year" ? { y: mo.y + k, m: mo.m } : addMonths(mo.y, mo.m, k); renderAll(); };
+const shiftPeriod = (key, scopeKey, k) => { if (ui[scopeKey] === "all") return; const mo = ui[key]; ui[key] = ui[scopeKey] === "year" ? { y: mo.y + k, m: mo.m } : addMonths(mo.y, mo.m, k); renderAll(); };
 const setSetting = (k, v) => { commit(() => { state.settings[k] = v; }); renderAll(); };
 const pickMonth = (key) => openDatePicker({ mode: "month", value: ymd(ui[key].y, ui[key].m, 1), onSelect: (d) => { const p = parseYMD(d); ui[key] = { y: p.y, m: p.m }; renderAll(); } });
 const recId = (el) => el.dataset.id;
@@ -1164,11 +1169,12 @@ const A = {
   "home-prev": () => shiftPeriod("homeMonth", "homeScope", -1), "home-next": () => shiftPeriod("homeMonth", "homeScope", 1),
   "details-prev": () => shiftPeriod("detailsMonth", "x", -1), "details-next": () => shiftPeriod("detailsMonth", "x", 1),
   "stats-prev": () => shiftPeriod("statsMonth", "statsScope", -1), "stats-next": () => shiftPeriod("statsMonth", "statsScope", 1),
-  "open-month-picker": (el) => pickMonth(el.dataset.target + "Month"),
+  "open-month-picker": (el) => ui[el.dataset.target + "Scope"] === "all" ? null : pickMonth(el.dataset.target + "Month"),
   "home-edit-done": () => { ui.homeEdit = false; renderAll(); },
   "toggle-group": (el) => { const g = el.dataset.group, h = state.settings.homeExpanded; commit(() => { state.settings.homeExpanded = { ...h, [g]: !h[g] }; }); renderAll(); },
+  "toggle-backup": () => { ui.backupOpen = !ui.backupOpen; renderSettings(); },
   "toggle-hide-income": () => setSetting("hideIncome", !state.settings.hideIncome),
-  "edit-budget": () => { if (ui.statsScope === "year") return toast("Edit the budget in Month view"); const i = $("budgetInput"); i.value = state.settings.monthlyBudget || ""; $("budgetTotal").classList.add("hidden"); i.classList.remove("hidden"); i.focus(); },
+  "edit-budget": () => { if (ui.statsScope !== "month") return toast("Edit the budget in Month view"); const i = $("budgetInput"); i.value = state.settings.monthlyBudget || ""; $("budgetTotal").classList.add("hidden"); i.classList.remove("hidden"); i.focus(); },
   "cal-day": (el) => jumpToDay(el.dataset.date),
   "toggle-filter": (el) => { const p = $("filterPanel"); p.classList.toggle("hidden"); el.setAttribute("aria-expanded", String(!p.classList.contains("hidden"))); },
   "clear-filter": () => { ui.from = ui.to = ui.fCat = ui.fTag = ""; renderAll(); },
@@ -1214,6 +1220,7 @@ const A = {
   "open-detail": (el) => { const c = el.closest(".swipe-content"); if (c && c.classList.contains("open")) closeSwipes(); else openDetail(recId(el)); },
   "rec-edit": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ id: recId(el) }); },
   "rec-refund": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ refundOf: recId(el) }); },
+  "rec-reimb": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ refundOf: recId(el), reimb: true }); },
   "rec-copy": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ copyOf: recId(el) }); },
   "rec-delete": (el) => { closeDlg("detailDialog"); closeSwipes(); deleteRecord(recId(el)); },
   "use-template": (el) => { const t = state.quickTemplates.find((x) => x.id === recId(el)); if (t) openForm({ tpl: t }); },
@@ -1248,7 +1255,7 @@ const A = {
       state.currencies = state.currencies.filter((x) => x.id !== c.id); if (!c.custom && !state.settings.removedCurrencies.includes(code)) state.settings.removedCurrencies.push(code);
       if (state.settings.defaultCurrencyId === c.id) state.settings.defaultCurrencyId = state.currencies.find((x) => !x.generic)?.id || ""; }); renderAll(); toast("Currency deleted"); }); },
   "save-profile": () => {
-    commit(() => { const s = state.settings; s.userName = $("profileNameInput").value.trim().slice(0, 20) || "Alex"; s.userId = $("profileIdInput").value.trim().replace(/\s+/g, "").slice(0, 24); if (prof.avatar) s.userAvatar = prof.avatar; });
+    commit(() => { const s = state.settings; s.userName = $("profileNameInput").value.trim().slice(0, 20) || "Rek"; s.userId = $("profileIdInput").value.trim().replace(/\s+/g, "").slice(0, 24); if (prof.avatar) s.userAvatar = prof.avatar; });
     goBack(); toast("Profile saved");
   },
   "change-pin": () => showLock("verify", "Enter current PIN", () => showLock("set1", "Create a 4-digit PIN")),
@@ -1267,7 +1274,7 @@ const segHandlers = {
   viewSeg: (s) => { ui.view = s.dataset.view; renderDetails(); },
   homeScope: (s) => { ui.homeScope = s.dataset.scope; renderHome(); },
   statsScope: (s) => { ui.statsScope = s.dataset.scope; renderStats(); },
-  formTypeSeg: (s) => { if (fm.typeLocked) return; fm.reimb = s.dataset.type === "reimb"; fm.type = fm.reimb ? "expense" : s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
+  formTypeSeg: (s) => { if (fm.typeLocked) return; fm.type = s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
   repeatKind: (s) => { if ($("repeatKind").classList.contains("locked")) return; fm.rep.kind = s.dataset.kind; renderForm(); },
   catKindSeg: (s) => { if (catDraft) { catDraft.kind = s.dataset.kind; renderCategoryEdit(); } },
   categoriesSegment: (s) => { ui.catFilter = s.dataset.filter; renderCategoriesPage(); },
@@ -1353,7 +1360,7 @@ function wire() {
 }
 function makeHomeIcon() {
   try {
-    if (/^https?:$/.test(location.protocol) && !/(^|\.)claude\.|usercontent/.test(location.hostname)) return null; /* hosted site uses apple-touch-icon.png */
+    if (/^https?:$/.test(location.protocol) && !/(^|\.)claude\.|usercontent/.test(location.hostname)) return null; /* hosted site: icon is embedded in index.html */
     const c = document.createElement("canvas"); c.width = c.height = 180; const x = c.getContext("2d");
     const g = x.createLinearGradient(0, 0, 0, 180); g.addColorStop(0, "#2ED0F4"); g.addColorStop(1, "#0C96D6"); x.fillStyle = g; x.fillRect(0, 0, 180, 180);
     x.fillStyle = "rgba(0,0,0,.18)"; x.beginPath(); x.arc(92, 98, 62, 0, 7); x.fill();
@@ -1364,13 +1371,40 @@ function makeHomeIcon() {
     return c;
   } catch (e) { return null; }
 }
+/* One-time tidy (v1.08): merge "Housing" into "Housing & Utilities" and give imported categories fitting icons. Nothing is deleted except the emptied Housing category. */
+const TIDY_ICONS = { "food & drink": "🍽️", transportation: "🚌", "housing & utilities": "🏠", shopping: "🛍️", "misc.": "", investment: "📈", "health care": "🏥", salary: "💼", "grab car": "🚗" };
+function tidy108() {
+  if (state.settings.tidy108) return;
+  const find = (n) => state.categories.find((c) => c.kind === "expense" && c.name.trim().toLowerCase() === n);
+  const H = find("housing"), HU = find("housing & utilities");
+  try { localStorage.setItem(APP_DATA_KEY + "_pretidy_" + Date.now(), JSON.stringify(state)); } catch (e) { return; }
+  commit(() => {
+    if (H && HU && H.id !== HU.id) {
+      const map = {};
+      H.tags.forEach((t) => { let m = HU.tags.find((x) => x.name.trim().toLowerCase() === t.name.trim().toLowerCase()); if (!m) { m = { id: t.id, name: t.name, order: HU.tags.length, archived: !!t.archived }; HU.tags.push(m); } map[t.id] = m.id; });
+      const mv = (x) => { if (x.categoryId === H.id) { x.categoryId = HU.id; if (x.tagId) x.tagId = map[x.tagId] || x.tagId; if (x.categoryNameSnapshot) x.categoryNameSnapshot = HU.name; } };
+      state.records.forEach(mv); state.recurringRules.forEach(mv); state.quickTemplates.forEach(mv);
+      state.categories = state.categories.filter((c) => c.id !== H.id);
+    }
+    state.categories.forEach((c) => { const k = c.name.trim().toLowerCase(); if (k in TIDY_ICONS && (c.icon === "🏷️" || c.icon === "💰")) c.icon = TIDY_ICONS[k]; });
+    state.settings.tidy108 = true;
+  });
+}
+function stickyHeads() {
+  document.querySelectorAll(".page").forEach((pg) => {
+    const a = pg.firstElementChild; if (!a || a.classList.contains("sticky-top")) return;
+    const w = document.createElement("div"); w.className = "sticky-top"; pg.insertBefore(w, a); w.appendChild(a);
+    const b = w.nextElementSibling; if (b && b.classList.contains("period-bar")) w.appendChild(b);
+  });
+}
 function init() {
   loadRatesCache(); state = loadState();
   const n = new Date(), mo = { y: n.getFullYear(), m: n.getMonth() + 1 };
   ui.homeMonth = { ...mo }; ui.detailsMonth = { ...mo }; ui.statsMonth = { ...mo };
-  fixUnconverted(); runReconcile(); wire(); renderAll();
+  tidy108(); fixUnconverted(); runReconcile(); wire(); renderAll();
   if (state.settings.lock.enabled) { showLock("unlock", "Enter PIN"); if (state.settings.lock.bio) bioUnlock(); }
-  fetchRates(); cloudInit(); makeHomeIcon();
+  fetchRates(); cloudInit(); makeHomeIcon(); stickyHeads();
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* best effort */ }
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol) && document.querySelector('link[rel="manifest"]')) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 document.addEventListener("DOMContentLoaded", init);
