@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.08";
+const APP_VERSION = "1.10";
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
@@ -64,6 +64,7 @@ const toNum = (v) => (v === null || v === undefined || v === "" || typeof v === 
 const round2 = (x) => Math.round((x + Number.EPSILON) * 100) / 100;
 const fmtNum = (x) => Number(x).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtShort = (x) => { const a = Math.abs(x); return a >= 1e6 ? (x / 1e6).toFixed(1) + "M" : a >= 1e4 ? (x / 1e3).toFixed(1) + "k" : a >= 1000 ? Math.round(x) + "" : a === 0 ? "0" : String(round2(x)); };
+const calAmt = (x) => { const t = fmtShort(x), i = t.indexOf("."); return i < 0 ? `<b class="ip">${t}</b><i class="fp"></i>` : `<b class="ip">${t.slice(0, i)}</b><i class="fp">${t.slice(i)}</i>`; };
 const monthLabel = (y, m) => MONTHS[m - 1] + " " + y;
 const safeSymbol = (s) => String(s ?? "").replace(/[<>"'&]/g, "").slice(0, 4);
 const safeColor = (c) => (/^#[0-9a-f]{6}$/i.test(c || "") ? c : "#8e8e93");
@@ -189,9 +190,30 @@ function loadState() {
   if (data.schema !== SCHEMA) { try { localStorage.setItem(APP_DATA_KEY + "_premigrate_" + (data.schema || "v" + data.version), raw); } catch (e) { /* ignore */ } }
   return normalizeState(data);
 }
+/* Second copy in IndexedDB + a record-count sentinel, so "my data vanished" can be detected and offered for recovery instead of silently starting empty. */
+const SENTINEL_KEY = "myLedger.sentinel.v1";
+function idbOpen() { return new Promise((res, rej) => { if (!window.indexedDB) return rej(new Error("no idb")); const q = indexedDB.open("myLedgerMirror", 1); q.onupgradeneeded = () => q.result.createObjectStore("kv"); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function idbPut(v) { const db = await idbOpen(); await new Promise((res, rej) => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(v, "state"); t.oncomplete = res; t.onerror = () => rej(t.error); }); db.close(); }
+async function idbGet() { const db = await idbOpen(); const v = await new Promise((res, rej) => { const q = db.transaction("kv").objectStore("kv").get("state"); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); db.close(); return v; }
+let mirrorTimer = null;
+function mirrorQueue(json) { clearTimeout(mirrorTimer); mirrorTimer = setTimeout(() => { idbPut({ at: Date.now(), n: state.records.length, json }).catch(() => {}); }, 800); }
+async function dataGuard() {
+  try {
+    let sen = null; try { sen = JSON.parse(localStorage.getItem(SENTINEL_KEY)); } catch (e) { /* ignore */ }
+    if (state.records.length > 0 || !sen || !(sen.n > 0)) return;
+    const m = await idbGet(); if (!m || !m.json || !(m.n > 0)) return;
+    showSheet(`Your saved data looks missing (${m.n} records were saved before). Restore the saved copy?`, [{ label: `Restore ${m.n} records`, run: () => { const inc = normalizeState(JSON.parse(m.json)); inc.settings.lock = clone(state.settings.lock); if (commit(() => { state = inc; })) { renderAll(); toast("Saved copy restored"); } } }]);
+  } catch (e) { /* guard is best effort */ }
+}
+function pruneSafety() {
+  try {
+    const ks = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(APP_DATA_KEY + "_")) ks.push(k); }
+    ks.sort().reverse().slice(2).forEach((k) => localStorage.removeItem(k));
+  } catch (e) { /* ignore */ }
+}
 function saveState() {
   if (recoveryMode) { toast("Read-only recovery mode. Export raw data first."); return false; }
-  try { localStorage.setItem(APP_DATA_KEY, JSON.stringify(state)); cloudQueue(); return true; } catch (e) { console.error(e); return false; }
+  try { const json = JSON.stringify(state); localStorage.setItem(APP_DATA_KEY, json); try { localStorage.setItem(SENTINEL_KEY, JSON.stringify({ n: state.records.length, at: Date.now() })); } catch (e2) { /* ignore */ } mirrorQueue(json); cloudQueue(); return true; } catch (e) { console.error(e); return false; }
 }
 /* ===== Cloud copy (artifact db capability; private per viewer, silently absent when unavailable) ===== */
 const cloud = { col: null, timer: null, last: "", busy: false };
@@ -632,7 +654,7 @@ function renderHome() {
 function filteredRecords(ignoreType) {
   let list = shownRecords(); const rangeOk = !(ui.from && ui.to && ui.from > ui.to);
   if ((ui.from || ui.to) && rangeOk) list = list.filter((r) => (!ui.from || r.date >= ui.from) && (!ui.to || r.date <= ui.to));
-  else list = periodRecords("month", ui.detailsMonth, list);
+  else if (!ui.search.trim()) list = periodRecords("month", ui.detailsMonth, list); /* searching looks through all records unless a date range is set */
   if (ui.fCat) list = list.filter((r) => r.categoryId === ui.fCat);
   if (ui.fTag) list = list.filter((r) => r.tagId === ui.fTag || (!r.tagId && r.tag === (catOf(ui.fCat)?.tags.find((t) => t.id === ui.fTag)?.name)));
   const q = ui.search.trim().toLowerCase();
@@ -655,7 +677,7 @@ function recordRow(r) {
   const sign = r.type === "income" && !r.isRefund ? "+" : r.isRefund ? "↩" : "−", b = baseOf(r);
   const conv = r.currencyCode === GEN ? `<span class="record-tag">Not counted</span>` : r.currencyCode === BASE ? "" : (b === null ? `<span class="flag-badge">No rate</span>` : `<span class="record-tag">≈ ${esc(fmtBase(b))}${r.rateEst ? " est." : ""}</span>`);
   const btns = [`<button type="button" class="swipe-btn edit" data-action="rec-edit" data-id="${esc(r.id)}">Edit</button>`];
-  if (r.type === "expense" && !r.isRefund) btns.push(`<button type="button" class="swipe-btn refund" data-action="rec-refund" data-id="${esc(r.id)}">Refund</button>`);
+  if (r.type === "expense" && !r.isRefund) btns.push(`<button type="button" class="swipe-btn refund" data-action="rec-refund" data-id="${esc(r.id)}">Payback</button>`);
   btns.push(`<button type="button" class="swipe-btn copy" data-action="rec-copy" data-id="${esc(r.id)}">Copy</button>`, `<button type="button" class="swipe-btn delete" data-action="rec-delete" data-id="${esc(r.id)}">Delete</button>`);
   const bd = repeatBadge(r), head = r.categoryNameSnapshot + (r.tagNameSnapshot ? " - " + r.tagNameSnapshot : "");
   return `<div class="swipe-container"><div class="swipe-actions">${btns.join("")}</div><div class="swipe-content" data-action="open-detail" data-id="${esc(r.id)}">` +
@@ -664,7 +686,7 @@ function recordRow(r) {
     `<div class="record-side"><span class="record-amount ${cls}">${isHiddenInc(r) ? MASK : sign + esc(fmtRec(r))}</span>${isHiddenInc(r) ? "" : conv}</div></div></div>`;
 }
 function renderDetails() {
-  const mo = ui.detailsMonth, hide = state.settings.hideIncome; $("detailsLabel").textContent = monthLabel(mo.y, mo.m); eyeSync();
+  const mo = ui.detailsMonth, hide = state.settings.hideIncome; $("detailsLabel").textContent = ui.search.trim() && !(ui.from || ui.to) ? "All records" : monthLabel(mo.y, mo.m); eyeSync();
   setSeg("viewSeg", "view", ui.view); $("calendarView").classList.toggle("hidden", ui.view !== "calendar"); $("listView").classList.toggle("hidden", ui.view !== "list");
   const s = sumRecords(ui.view === "calendar" ? periodRecords("month", mo) : filteredRecords(true));
   $("monthIncome").textContent = hide ? MASK : fmtBase(s.inc); $("monthExpense").textContent = fmtBase(s.net);
@@ -688,7 +710,7 @@ function renderCalendar(mo) {
   let h = ""; for (let i = 0; i < first; i++) h += `<span class="cal-day empty"></span>`;
   for (let d = 1; d <= days; d++) {
     const ds = ymd(mo.y, mo.m, d), s = sumRecords(by[ds] || []), exp = s.net;
-    h += `<button type="button" class="cal-day${ds === today ? " today" : ""}" data-action="cal-day" data-date="${ds}"><span class="n">${d}</span>${s.inc > 0 ? `<span class="cal-inc">${state.settings.hideIncome ? "•••" : fmtShort(s.inc)}</span>` : ""}${exp > 0 ? `<span class="cal-exp">${fmtShort(exp)}</span>` : ""}</button>`;
+    h += `<button type="button" class="cal-day${ds === today ? " today" : ""}" data-action="cal-day" data-date="${ds}"><span class="n">${d}</span><span class="cal-inc">${s.inc > 0 ? (state.settings.hideIncome ? "•••" : calAmt(s.inc)) : ""}</span><span class="cal-exp">${exp > 0 ? calAmt(exp) : ""}</span></button>`;
   }
   $("calGrid").innerHTML = h;
 }
@@ -746,7 +768,7 @@ function renderSettings() {
   $("accentPreview").style.background = safeColor(s.themeColor); $("skinPreview").style.background = (SKINS.find((k) => k[0] === s.skinColor) || SKINS[0])[1];
   $("profileSummary").textContent = [s.userName, s.userId && "@" + s.userId].filter(Boolean).join(" · "); $("quarantineCount").textContent = state.quarantine.length ? `${state.quarantine.length} item(s)` : "None";
   $("cloudStatus").textContent = !cloud.col ? "Not available in this view" : cloud.last ? "Last synced " + cloud.last.slice(0, 16).replace("T", " ") : "Waiting for first save";
-  $("versionLabel").textContent = `My Ledger v${APP_VERSION}`;
+  $("versionLabel").textContent = `My Ledger v${APP_VERSION}`; try { if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then((p) => { $("versionLabel").textContent = `My Ledger v${APP_VERSION} · ${state.records.length} records · storage ${p ? "protected" : "standard"}`; }); } catch (e) { /* ignore */ }
 }
 function renderSecurity() {
   const lk = state.settings.lock; $("lockToggle").checked = lk.enabled; $("lockState").textContent = lk.enabled ? "On · PIN required on launch" : "Off"; $("changePinRow").classList.toggle("hidden", !lk.enabled); $("bioRow").classList.toggle("hidden", !lk.enabled); $("bioToggle").checked = !!lk.bio; $("bioState").textContent = lk.bio ? "On · unlock with Face ID" : bioSupported() ? "Off" : "Not available in this browser";
@@ -860,7 +882,10 @@ function openForm(o = {}) {
 }
 function renderForm() {
   const isRec = fm.mode === "record", isTpl = fm.mode === "template", isRule = fm.mode === "rule", rp = fm.rep, ex = fm.ex;
-  $("formNameRow").classList.toggle("hidden", !isTpl); setSeg("formTypeSeg", "type", fm.type); $("formTypeSeg").classList.toggle("locked", fm.typeLocked);
+  $("formNameRow").classList.toggle("hidden", !isTpl); const pbMode = isRec && (!!fm.refundOf || !!(ex && ex.isRefund));
+  $("formTypeSeg").innerHTML = pbMode ? '<button type="button" class="segment" data-type="refund">Refund</button><button type="button" class="segment" data-type="reimb">Reimburse</button>' : '<button type="button" class="segment" data-type="expense">Expense</button><button type="button" class="segment" data-type="income">Income</button>';
+  setSeg("formTypeSeg", "type", pbMode ? (fm.reimb ? "reimb" : "refund") : fm.type); $("formTypeSeg").classList.toggle("locked", !pbMode && fm.typeLocked);
+  if (pbMode) $("formTitle").textContent = ex ? (fm.reimb ? "Edit Reimbursement" : "Edit Refund") : (fm.reimb ? "Reimbursement" : "Refund");
   $("toolDate").classList.toggle("hidden", isTpl); $("toolPhoto").classList.toggle("hidden", !isRec); $("toolRepeat").classList.toggle("hidden", !(isRec && !fm.refundOf && !fm.reimb && !(ex && (ex.isRefund || ex.recurringRuleId))));
   $("toolNote").classList.toggle("on", !!$("formNote").value.trim()); $("toolPhoto").classList.toggle("on", !!fm.photo); $("toolRepeat").classList.toggle("on", rp.on && !isRule);
   $("toolInfo").textContent = isRec ? `${fmtDate(fm.date)} ${fmtTime(fm.time)}` : isRule ? "Starts " + fmtDate(fm.date) : "";
@@ -920,16 +945,29 @@ function saveForm() {
     rule.generatedMonths = [occKey(rule, fm.date)];
   }
   const now = new Date().toISOString(), same = ex && ex.categoryId === cat.id;
-  const rec = { ...(ex || { createdAt: now, recurringRuleId: null }), id: ex ? ex.id : makeId("rec"), type: fm.refundOf || fm.reimb ? "income" : fm.type, amount, currencyCode: code,
+  const rec = { ...(ex || { createdAt: now, recurringRuleId: null }), id: ex ? ex.id : makeId("rec"), type: fm.refundOf || fm.reimb || (ex && ex.isRefund) ? "income" : fm.type, amount, currencyCode: code,
     currencySymbol: ex && ex.currencyCode === code && ex.currencySymbol ? ex.currencySymbol : symOf(code), exchangeRate: rate, baseAmount: base, categoryId: cat.id,
     categoryNameSnapshot: same && ex.categoryNameSnapshot ? ex.categoryNameSnapshot : cat.name, tag: sf.tag, tagId: sf.tagId, tagNameSnapshot: sf.snap, date: fm.date, time: fm.time || "00:00",
     note, photo: fm.photo || "", isRefund: !!fm.refundOf || (ex ? !!ex.isRefund : false), isReimb: !!fm.reimb && (!!fm.refundOf || !!(ex && ex.isRefund)), originalRecordId: ex ? ex.originalRecordId || null : (fm.refundOf || null), updatedAt: now };
   if (est) rec.rateEst = true; else delete rec.rateEst;
   if (rule) Object.assign(rec, { recurringRuleId: rule.id, ruleKey: rule.generatedMonths[0], repeatKind: rule.kind, repeatFreq: rule.freq, installmentIndex: 1, installmentTotal: rule.installmentTotal });
-  const ok = commit(() => { if (rule) state.recurringRules.push(rule); if (ex) { const i = state.records.findIndex((r) => r.id === ex.id); state.records[i] = rec; } else state.records.push(rec); });
-  if (!ok) return;
-  closeDlg("formDialog"); closeSwipes(); if (rule) runReconcile(); renderAll();
-  toast(ex ? "Record updated" : rule ? "Record saved with repeat" : "Record saved");
+  const finish = (updateRule) => {
+    const ok = commit(() => {
+      if (rule) state.recurringRules.push(rule);
+      if (ex) { const i = state.records.findIndex((r) => r.id === ex.id); state.records[i] = rec; }
+      else state.records.push(rec);
+      if (updateRule) { const ru = state.recurringRules.find((x) => x.id === ex.recurringRuleId); if (ru) ru.history.push({ from: ex.ruleKey || ex.date, fields: { type: rec.type, amount: rec.amount, currencyCode: rec.currencyCode, categoryId: rec.categoryId, tag: rec.tag, tagId: rec.tagId, note: rec.note } }); }
+    });
+    if (!ok) return;
+    closeDlg("formDialog"); closeSwipes(); if (rule || updateRule) runReconcile(); renderAll();
+    toast(ex ? (updateRule ? "Record and recurring rule updated" : "Record updated") : rule ? "Record saved with repeat" : "Record saved");
+  };
+  const ru0 = ex && ex.recurringRuleId && !ex.isRefund ? state.recurringRules.find((x) => x.id === ex.recurringRuleId) : null;
+  if (ru0 && ["categoryId", "tagId", "amount", "currencyCode", "note", "type"].some((k) => (ex[k] ?? "") !== (rec[k] ?? ""))) {
+    showSheet("This record belongs to a recurring rule. Apply the change to future records too?", [{ label: "This record only", run: () => finish(false) }, { label: "This and future (update the rule)", run: () => finish(true) }]);
+    return;
+  }
+  finish(false);
 }
 function saveTemplateForm(amount, cat) {
   const label = $("formName").value.trim(), ex = fm.ex;
@@ -972,7 +1010,7 @@ function openDetail(id) {
     (bd && !r.isRefund ? row("Repeat", bd.t) : "") + (orig ? row(r.isReimb ? "Reimbursed" : "Refund of", fmtRec(orig) + " · " + fmtDate(orig.date)) : "") + (rf.length ? row("Refunded", symOf(r.currencyCode) + fmtNum(rf.reduce((s, x) => s + x.amount, 0))) : "") + `</div>`;
   if (r.photo && r.photo.startsWith("data:image/")) h += `<div class="form-field"><img src="${esc(r.photo)}" alt="Attachment" style="max-width:100%;border-radius:10px"></div>`;
   h += `<div class="dialog-actions" style="flex-wrap:wrap"><button type="button" class="button button-secondary" data-action="rec-edit" data-id="${esc(r.id)}">Edit</button>` +
-    (r.type === "expense" && !r.isRefund ? `<button type="button" class="button button-secondary" data-action="rec-refund" data-id="${esc(r.id)}">Refund</button><button type="button" class="button button-secondary" data-action="rec-reimb" data-id="${esc(r.id)}">Reimburse</button>` : "") +
+    (r.type === "expense" && !r.isRefund ? `<button type="button" class="button button-secondary" data-action="rec-refund" data-id="${esc(r.id)}">Payback</button>` : "") +
     `<button type="button" class="button button-secondary" data-action="rec-copy" data-id="${esc(r.id)}">Copy</button><button type="button" class="button button-danger" data-action="rec-delete" data-id="${esc(r.id)}">Delete</button></div>`;
   $("detailBody").innerHTML = h; openDlg("detailDialog");
 }
@@ -1220,7 +1258,6 @@ const A = {
   "open-detail": (el) => { const c = el.closest(".swipe-content"); if (c && c.classList.contains("open")) closeSwipes(); else openDetail(recId(el)); },
   "rec-edit": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ id: recId(el) }); },
   "rec-refund": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ refundOf: recId(el) }); },
-  "rec-reimb": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ refundOf: recId(el), reimb: true }); },
   "rec-copy": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ copyOf: recId(el) }); },
   "rec-delete": (el) => { closeDlg("detailDialog"); closeSwipes(); deleteRecord(recId(el)); },
   "use-template": (el) => { const t = state.quickTemplates.find((x) => x.id === recId(el)); if (t) openForm({ tpl: t }); },
@@ -1274,7 +1311,7 @@ const segHandlers = {
   viewSeg: (s) => { ui.view = s.dataset.view; renderDetails(); },
   homeScope: (s) => { ui.homeScope = s.dataset.scope; renderHome(); },
   statsScope: (s) => { ui.statsScope = s.dataset.scope; renderStats(); },
-  formTypeSeg: (s) => { if (fm.typeLocked) return; fm.type = s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
+  formTypeSeg: (s) => { if (fm.mode === "record" && (fm.refundOf || (fm.ex && fm.ex.isRefund))) { fm.reimb = s.dataset.type === "reimb"; return renderForm(); } if (fm.typeLocked) return; fm.type = s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
   repeatKind: (s) => { if ($("repeatKind").classList.contains("locked")) return; fm.rep.kind = s.dataset.kind; renderForm(); },
   catKindSeg: (s) => { if (catDraft) { catDraft.kind = s.dataset.kind; renderCategoryEdit(); } },
   categoriesSegment: (s) => { ui.catFilter = s.dataset.filter; renderCategoriesPage(); },
@@ -1401,9 +1438,9 @@ function init() {
   loadRatesCache(); state = loadState();
   const n = new Date(), mo = { y: n.getFullYear(), m: n.getMonth() + 1 };
   ui.homeMonth = { ...mo }; ui.detailsMonth = { ...mo }; ui.statsMonth = { ...mo };
-  tidy108(); fixUnconverted(); runReconcile(); wire(); renderAll();
+  pruneSafety(); tidy108(); fixUnconverted(); runReconcile(); wire(); renderAll();
   if (state.settings.lock.enabled) { showLock("unlock", "Enter PIN"); if (state.settings.lock.bio) bioUnlock(); }
-  fetchRates(); cloudInit(); makeHomeIcon(); stickyHeads();
+  fetchRates(); cloudInit(); makeHomeIcon(); stickyHeads(); dataGuard();
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* best effort */ }
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol) && document.querySelector('link[rel="manifest"]')) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
