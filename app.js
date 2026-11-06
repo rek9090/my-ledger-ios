@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.14";
+const APP_VERSION = "1.16";
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
@@ -676,7 +676,8 @@ function repeatBadge(r) {
 function recordRow(r) {
   const cat = catOf(r.categoryId), col = safeColor(cat?.color), cls = r.isRefund ? "refund-amount" : r.type === "income" ? "income-amount" : "expense-amount";
   const sign = r.type === "income" && !r.isRefund ? "+" : r.isRefund ? "↩" : "−", b = baseOf(r);
-  const conv = r.currencyCode === GEN ? `<span class="record-tag">Not counted</span>` : r.currencyCode === BASE ? "" : (b === null ? `<span class="flag-badge">No rate</span>` : `<span class="record-tag">≈ ${esc(fmtBase(b))}${r.rateEst ? " est." : ""}</span>`);
+  const foreign = r.currencyCode !== GEN && r.currencyCode !== dispCode() && b !== null; /* foreign records show the base-currency amount on top, the original smaller below */
+  const conv = r.currencyCode === GEN ? `<span class="record-tag">Not counted</span>` : r.currencyCode === dispCode() ? "" : (b === null ? `<span class="flag-badge">No rate</span>` : `<span class="record-tag">${esc(fmtRec(r))}</span>`);
   const btns = [`<button type="button" class="swipe-btn edit" data-action="rec-edit" data-id="${esc(r.id)}">Edit</button>`];
   if (r.type === "expense" && !r.isRefund) btns.push(`<button type="button" class="swipe-btn refund" data-action="rec-refund" data-id="${esc(r.id)}">Payback</button>`);
   btns.push(`<button type="button" class="swipe-btn copy" data-action="rec-copy" data-id="${esc(r.id)}">Copy</button>`, `<button type="button" class="swipe-btn delete" data-action="rec-delete" data-id="${esc(r.id)}">Delete</button>`);
@@ -684,7 +685,7 @@ function recordRow(r) {
   return `<div class="swipe-container"><div class="swipe-actions">${btns.join("")}</div><div class="swipe-content" data-action="open-detail" data-id="${esc(r.id)}">` +
     `<span class="record-icon" style="background:${col}33">${esc(cat?.icon || "🏷️")}</span><div class="record-main"><div class="record-title"><span class="t-text">${esc(head)}</span>${bd ? `<span class="flag-badge ${bd.c}">${esc(bd.t)}</span>` : ""}</div>` +
     `<div class="record-subtitle">${r.note ? esc(r.note) + " · " : ""}${esc(fmtTime(r.time))}</div></div>` +
-    `<div class="record-side"><span class="record-amount ${cls}">${isHiddenInc(r) ? MASK : sign + esc(fmtRec(r))}</span>${isHiddenInc(r) ? "" : conv}</div></div></div>`;
+    `<div class="record-side"><span class="record-amount ${cls}">${isHiddenInc(r) ? MASK : sign + esc(foreign ? fmtBase(b) : fmtRec(r))}</span>${isHiddenInc(r) ? "" : conv}</div></div></div>`;
 }
 function renderDetails() {
   const mo = ui.detailsMonth, hide = state.settings.hideIncome; $("detailsLabel").textContent = ui.search.trim() && !(ui.from || ui.to) ? "All records" : monthLabel(mo.y, mo.m); eyeSync();
