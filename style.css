@@ -318,3 +318,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .a-grid{display:grid;grid-template-columns:64px auto;font-size:13px;color:var(--muted,#8e8e93);margin-top:3px;row-gap:1px}
 .a-side-col{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none;text-align:right}
 .a-side-col .cur-chip{margin:0}
+.asset-row,.group-head{display:flex;align-items:center;gap:10px}
+.asset-row .a-main,.group-head .a-main{flex:1;min-width:0}
+.asset-row .a-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.asset-row .a-side,.group-head .a-side-inline{flex:none;margin-left:auto}
