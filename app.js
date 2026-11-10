@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.19";
+const APP_VERSION = "1.20";
 /* Version guard: index.html and app.js must be the same release. If an old cached index.html is paired with this app.js, purge caches and reload once. */
 (function () {
   try {
@@ -909,6 +909,7 @@ const AR_KIND = { in: "INVEST", out: "WITHDRAW", loss: "LOSS" };
 function renderAssetPage() {
   const a = state.assets.find((x) => x.id === ui.assetId); if (!a) return;
   const s = assetStats(a), c = s.code; $("assetTitle").textContent = `${a.icon} ${a.name}`; setSeg("assetFilterSeg", "filter", ui.assetFilter);
+  $("assetHead").innerHTML = `<span class="record-icon" style="background:#F59E0B33">${esc(a.icon)}</span><div class="a-main"><div class="a-title">${esc(a.name)}</div><div class="a-sub">${esc(assetCat(a).icon)} ${esc(assetCat(a).name)} · ${esc(c)}${a.archived ? " · Archived" : ""}</div></div><button type="button" class="asset-edit-btn" data-action="asset-edit">Edit</button>`;
   $("assetKpi").innerHTML = `<div class="kpi"><span class="kpi-label">Invested</span><b>${esc(afmt(c, s.inn))}</b></div><div class="kpi"><span class="kpi-label">Principal</span><b>${esc(afmt(c, s.principal))}</b></div><div class="kpi"><span class="kpi-label">Profit</span><b class="${plCls(s.profit)}">${esc(asg(c, s.profit) || afmt(c, 0))}</b></div>`;
   const list = s.recs.filter((x) => ui.assetFilter === "all" || x.kind === ui.assetFilter).reverse();
   $("assetRecList").innerHTML = list.map((x) => { const sign = x.kind === "out" ? "+" : x.kind === "loss" ? "−" : "", part = x.kind === "out" ? (x.part === "profit" ? "Profit" : "Principal") : "";

@@ -324,3 +324,4 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .asset-row .a-side,.group-head .a-side-inline{flex:none;margin-left:auto}
 
 @supports (-webkit-touch-callout: none) { input, select, textarea { font-size: 16px !important; } }
+.asset-head{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:10px}.asset-head .a-main{flex:1;min-width:0}.asset-head .a-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.asset-edit-btn{border:1px solid rgba(52,120,246,.35);background:rgba(52,120,246,.1);color:var(--accent,#3478F6);font-size:15px;border-radius:14px;padding:5px 14px;cursor:pointer}
