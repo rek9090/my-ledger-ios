@@ -1,7 +1,18 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.18";
+const APP_VERSION = "1.19";
+/* Version guard: index.html and app.js must be the same release. If an old cached index.html is paired with this app.js, purge caches and reload once. */
+(function () {
+  try {
+    if (!document.querySelector('script[src^="app.js"]')) return;
+    const m = document.querySelector('meta[name="app-version"]');
+    if (m && m.content === APP_VERSION) { try { sessionStorage.removeItem("ml.vguard"); } catch (e) { /* ignore */ } return; }
+    if (sessionStorage.getItem("ml.vguard") === "1") return;
+    sessionStorage.setItem("ml.vguard", "1"); window.__stopInit = true;
+    if (window.__mlReload) window.__mlReload(); else location.reload();
+  } catch (e) { /* ignore */ }
+})();
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
@@ -1585,12 +1596,14 @@ function stickyHeads() {
   });
 }
 function init() {
+  if (window.__stopInit) return;
   loadRatesCache(); state = loadState();
   const n = new Date(), mo = { y: n.getFullYear(), m: n.getMonth() + 1 };
   ui.homeMonth = { ...mo }; ui.detailsMonth = { ...mo }; ui.statsMonth = { ...mo };
-  pruneSafety(); tidy108(); fixUnconverted(); runReconcile(); wire(); renderAll();
+  const step = (f) => { try { f(); } catch (e) { if (window.__ml) window.__ml.err = "init: " + (e && e.message) + (e && e.stack ? " " + String(e.stack).split("\n")[0] : ""); } };
+  [pruneSafety, tidy108, fixUnconverted, runReconcile].forEach(step); wire(); step(renderAll);
   if (state.settings.lock.enabled) { showLock("unlock", "Enter PIN"); if (state.settings.lock.bio) bioUnlock(); }
-  fetchRates(); cloudInit(); makeHomeIcon(); stickyHeads(); dataGuard();
+  [fetchRates, cloudInit, makeHomeIcon, stickyHeads, dataGuard].forEach(step); if (window.__ml) window.__ml.ready = true;
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* best effort */ }
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol) && document.querySelector('link[rel="manifest"]')) navigator.serviceWorker.register("sw.js").catch(() => {});
 }

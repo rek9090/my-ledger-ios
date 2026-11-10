@@ -322,3 +322,5 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .asset-row .a-main,.group-head .a-main{flex:1;min-width:0}
 .asset-row .a-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .asset-row .a-side,.group-head .a-side-inline{flex:none;margin-left:auto}
+
+@supports (-webkit-touch-callout: none) { input, select, textarea { font-size: 16px !important; } }
