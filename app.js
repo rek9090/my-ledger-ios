@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== Constants ===== */
-const APP_VERSION = "1.16";
+const APP_VERSION = "1.18";
 const SCHEMA = 5;
 const APP_DATA_KEY = "myLedgerAppData";
 const RATE_KEY = "myLedger.rates.v1";
@@ -81,7 +81,7 @@ let state = null;
 let recoveryMode = false;
 let rawCorrupt = null;
 let rates = { base: BASE, rates: { ...BUILTIN_RATES }, real: {}, date: BUILTIN_DATE, source: "builtin", fetchedAt: 0 };
-const ui = { tab: "home", pages: [], homeMonth: null, detailsMonth: null, statsMonth: null, homeScope: "month", statsScope: "month", view: "list", type: "all",
+const ui = { tab: "home", pages: [], assetId: null, assetFilter: "all", propView: "active", propOpen: {}, homeMonth: null, detailsMonth: null, statsMonth: null, homeScope: "month", statsScope: "month", view: "list", type: "all",
   search: "", from: "", to: "", fCat: "", fTag: "", catFilter: "expense", catEdit: false, homeEdit: false, ruleFilter: "active" };
 
 function defaultSettings() {
@@ -90,7 +90,7 @@ function defaultSettings() {
     homeExpanded: { expense: true, income: false }, lock: { enabled: false, salt: "", hash: "", recSalt: "", recHash: "" } };
 }
 function createDefaultState() {
-  return { version: APP_VERSION, schema: SCHEMA, categories: normalizeCategories(clone(DEFAULT_CATEGORIES)), currencies: clone(DEFAULT_CURRENCIES), records: [], recurringRules: [], quickTemplates: [], quarantine: [], settings: defaultSettings() };
+  return { version: APP_VERSION, schema: SCHEMA, categories: normalizeCategories(clone(DEFAULT_CATEGORIES)), currencies: clone(DEFAULT_CURRENCIES), records: [], assets: [], assetCats: clone(ASSET_CATS), assetRecords: [], recurringRules: [], quickTemplates: [], quarantine: [], settings: defaultSettings() };
 }
 function normalizeCategories(list) {
   const seen = new Set();
@@ -160,6 +160,19 @@ function normalizeState(data) {
       tagId: r.tagId || cat?.tags.find((t) => t.name === tag)?.id || null, isRefund, isReimb: !!r.isReimb && isRefund, originalRecordId: r.originalRecordId || null });
   });
   out.records = records;
+  out.assetCats = (Array.isArray(data.assetCats) && data.assetCats.length ? data.assetCats.filter((c) => c && c.id && typeof c.name === "string").map((c, i) => ({ ...c, id: String(c.id), name: c.name.slice(0, 30), icon: typeof c.icon === "string" && c.icon ? c.icon : "📁", order: Number.isFinite(c.order) ? c.order : i, archived: !!c.archived })) : clone(ASSET_CATS));
+  if (!out.assetCats.length) out.assetCats = clone(ASSET_CATS);
+  const acids = new Set(out.assetCats.map((c) => c.id));
+  out.assets = (Array.isArray(data.assets) ? data.assets : []).filter((a) => a && a.id && typeof a.name === "string").map((a, i) => ({ ...a, id: String(a.id), name: a.name.slice(0, 30) || "Asset", icon: typeof a.icon === "string" && a.icon ? a.icon.slice(0, 4) : "💼", catId: acids.has(a.catId) ? a.catId : out.assetCats[0].id, order: Number.isFinite(a.order) ? a.order : i, archived: !!a.archived, currency: /^[A-Z]{3}$/.test(a.currency || "") ? a.currency : "" }));
+  const aids = new Set(out.assets.map((a) => a.id)); out.assetRecords = [];
+  (Array.isArray(data.assetRecords) ? data.assetRecords : []).forEach((x) => {
+    const amt = x ? toNum(x.amount) : null;
+    if (!x || !x.id || !aids.has(x.assetId) || !["in", "out", "loss"].includes(x.kind) || amt === null || amt < 0 || !isYMD(x.date)) { out.quarantine.push({ reason: "invalid property record", raw: x }); return; }
+    const code = /^[A-Z]{3}$/.test(x.currencyCode || "") ? x.currencyCode : BASE; let b = toNum(x.baseAmount); if (b === null) b = code === BASE ? amt : null;
+    out.assetRecords.push({ ...x, part: x.kind === "out" ? (x.part === "profit" ? "profit" : "principal") : undefined, id: String(x.id), amount: amt, currencyCode: code, baseAmount: b, exchangeRate: toNum(x.exchangeRate), time: /^\d{2}:\d{2}$/.test(x.time || "") ? x.time : "00:00", note: String(x.note ?? "") });
+  });
+  out.assets.forEach((a) => { if (!a.currency) { const f = out.assetRecords.find((x) => x.assetId === a.id); a.currency = f ? f.currencyCode : BASE; } });
+  out.assetRecords.forEach((x) => { const a = out.assets.find((y) => y.id === x.assetId), c = a.currency; if (x.currencyCode !== c && c === BASE && x.baseAmount !== null) { x.amount = round2(x.baseAmount); x.currencyCode = BASE; x.currencySymbol = symOf(BASE); } });
   inferKinds(out.categories, records);
   out.recurringRules = (Array.isArray(data.recurringRules) ? data.recurringRules : []).filter((r) => r && r.id).map((r, i) => {
     const kind = KINDS.includes(r.kind) ? r.kind : KINDS.includes(r.ruleType) ? r.ruleType : "recurring", freq = FREQS.includes(r.freq) ? r.freq : "monthly";
@@ -282,6 +295,8 @@ async function fetchRates(force) {
 }
 function fixUnconverted() {
   const need = (r) => r.currencyCode !== GEN && r.currencyCode !== BASE && (baseOf(r) === null || (r.rateEst && !isEstRate(r.currencyCode)));
+  const need2 = (r) => r.currencyCode !== GEN && r.currencyCode !== BASE && (arBase(r) === null || (r.rateEst && !isEstRate(r.currencyCode)));
+  if (state.assetRecords.some(need2)) commit(() => state.assetRecords.forEach((r) => { if (!need2(r)) return; const rt = rateOf(r.currencyCode); if (!rt) return; r.baseAmount = r.amount / rt; r.exchangeRate = rt; if (isEstRate(r.currencyCode)) r.rateEst = true; else delete r.rateEst; }));
   if (state.records.some(need)) commit(() => state.records.forEach((r) => {
     if (!need(r)) return; const rt = rateOf(r.currencyCode); if (!rt) return;
     r.baseAmount = r.amount / rt; r.exchangeRate = rt; if (isEstRate(r.currencyCode)) r.rateEst = true; else delete r.rateEst;
@@ -594,7 +609,8 @@ function dpNav(k) {
 /* ===== Rendering ===== */
 function renderAll() {
   if (!state) return;
-  applyTheme(); renderBanners(); renderAvatar(); renderHome(); renderDetails(); renderStats(); renderSettings();
+  applyTheme(); renderBanners(); renderAvatar(); renderHome(); renderDetails(); renderStats(); renderProperty(); renderSettings();
+  if (ui.pages.includes("asset")) renderAssetPage();
   if (ui.pages.includes("profile")) renderSecurity();
   if (ui.pages.includes("categories")) renderCategoriesPage();
   if (ui.pages.includes("categoryEdit")) renderCategoryEdit();
@@ -655,7 +671,7 @@ function renderHome() {
 function filteredRecords(ignoreType) {
   let list = shownRecords(); const rangeOk = !(ui.from && ui.to && ui.from > ui.to);
   if ((ui.from || ui.to) && rangeOk) list = list.filter((r) => (!ui.from || r.date >= ui.from) && (!ui.to || r.date <= ui.to));
-  else if (!ui.search.trim()) list = periodRecords("month", ui.detailsMonth, list); /* searching looks through all records unless a date range is set */
+  else if (!ui.search.trim() && !ui.fCat && !ui.fTag && ui.type === "all") list = periodRecords("month", ui.detailsMonth, list); /* search / category / type filters look through all records unless a date range is set */ /* searching looks through all records unless a date range is set */
   if (ui.fCat) list = list.filter((r) => r.categoryId === ui.fCat);
   if (ui.fTag) list = list.filter((r) => r.tagId === ui.fTag || (!r.tagId && r.tag === (catOf(ui.fCat)?.tags.find((t) => t.id === ui.fTag)?.name)));
   const q = ui.search.trim().toLowerCase();
@@ -688,7 +704,7 @@ function recordRow(r) {
     `<div class="record-side"><span class="record-amount ${cls}">${isHiddenInc(r) ? MASK : sign + esc(foreign ? fmtBase(b) : fmtRec(r))}</span>${isHiddenInc(r) ? "" : conv}</div></div></div>`;
 }
 function renderDetails() {
-  const mo = ui.detailsMonth, hide = state.settings.hideIncome; $("detailsLabel").textContent = ui.search.trim() && !(ui.from || ui.to) ? "All records" : monthLabel(mo.y, mo.m); eyeSync();
+  const mo = ui.detailsMonth, hide = state.settings.hideIncome; $("detailsLabel").textContent = (ui.search.trim() || ui.fCat || ui.fTag || ui.type !== "all") && !(ui.from || ui.to) ? "All records" : monthLabel(mo.y, mo.m); eyeSync();
   setSeg("viewSeg", "view", ui.view); $("calendarView").classList.toggle("hidden", ui.view !== "calendar"); $("listView").classList.toggle("hidden", ui.view !== "list");
   const s = sumRecords(ui.view === "calendar" ? periodRecords("month", mo) : filteredRecords(true));
   $("monthIncome").textContent = hide ? MASK : fmtBase(s.inc); $("monthExpense").textContent = fmtBase(s.net);
@@ -836,6 +852,116 @@ function renderQuarantine() {
   $("quarantineList").innerHTML = state.quarantine.map((q) => `<div class="row"><span class="row-label">${esc(q.reason)}<small>${esc(JSON.stringify(q.raw).slice(0, 140))}</small></span></div>`).join("") || `<p class="row-hint">Nothing quarantined.</p>`;
 }
 
+/* ===== Property (assets): Invest / Withdraw (principal or profit) / Loss. Each asset has its own currency; no conversion. Separate from the Ledger and Stats. ===== */
+const ASSET_CATS = [{ id: "acat-trading", name: "Trading", icon: "📈", order: 0, archived: false }, { id: "acat-realestate", name: "Real Estate", icon: "🏠", order: 1, archived: false }];
+const ASSET_ICONS = [["📈", "Trading"], ["🥇", "Gold"], ["💱", "Forex"], ["📊", "Stocks"], ["₿", "Crypto"], ["🛢️", "Oil"], ["🏠", "House"], ["🏢", "Apartment"], ["🏘️", "Property"], ["🏦", "Bank"], ["💵", "Cash"], ["💼", "Other"]];
+const arKey = (a) => a.date + " " + a.time;
+const acode = (a) => (a && /^[A-Z]{3}$/.test(a.currency || "") ? a.currency : BASE);
+const afmt = (code, n) => symOf(code) + fmtNum(n);
+const asg = (code, n) => (Math.abs(n) < 0.005 ? "" : n < 0 ? "−" : "+") + afmt(code, Math.abs(n));
+const plCls = (v) => (v > 0.004 ? "pos" : v < -0.004 ? "neg" : "");
+const assetCat = (a) => state.assetCats.find((c) => c.id === a.catId) || state.assetCats[0];
+function assetStats(asset) {
+  const recs = state.assetRecords.filter((x) => x.assetId === asset.id).sort((a, b) => (arKey(a) < arKey(b) ? -1 : arKey(a) > arKey(b) ? 1 : 0));
+  let inn = 0, outP = 0, outPr = 0, loss = 0;
+  recs.forEach((x) => { if (x.kind === "in") inn += x.amount; else if (x.kind === "loss") loss += x.amount; else if (x.part === "profit") outPr += x.amount; else outP += x.amount; });
+  return { recs, code: acode(asset), inn, loss, principal: inn - outP - loss, profit: outPr - loss };
+}
+function curBox(label, m, key, signed, colored) {
+  const codes = [...m.keys()].sort(), lines = codes.map((c) => { const v = m.get(c)[key]; return `<b class="${colored ? plCls(v) : ""}">${esc(signed ? asg(c, v) || afmt(c, 0) : afmt(c, v))}</b>`; });
+  return `<div class="kpi"><span class="kpi-label">${label}</span>${lines.join("") || `<b>${esc(afmt(BASE, 0))}</b>`}</div>`;
+}
+function renderProperty() {
+  const view = ui.propView, st = new Map(state.assets.map((a) => [a.id, assetStats(a)])), tot = new Map();
+  const bucket = (m, c) => { if (!m.has(c)) m.set(c, { inn: 0, principal: 0, profit: 0 }); return m.get(c); };
+  state.assets.forEach((a) => { const s = st.get(a.id), t = bucket(tot, s.code); t.profit += s.profit; if (!a.archived && !assetCat(a).archived) { t.inn += s.inn; t.principal += s.principal; } });
+  [...tot.keys()].forEach((c) => { const t = tot.get(c); if (!t.inn && !t.principal && Math.abs(t.profit) < 0.005) tot.delete(c); });
+  setSeg("propViewSeg", "view", view);
+  $("propKpi").innerHTML = curBox("Invested", tot, "inn", false, false) + curBox("Principal", tot, "principal", false, false) + curBox("Profit", tot, "profit", true, true);
+  const cats = state.assetCats.slice().sort((a, b) => a.order - b.order), out = [];
+  cats.forEach((c) => {
+    const all = state.assets.filter((a) => assetCat(a).id === c.id).sort((a, b) => a.order - b.order);
+    const rows = view === "active" ? (c.archived ? [] : all.filter((a) => !a.archived)) : (c.archived ? all : all.filter((a) => a.archived));
+    if (view === "archived" && !rows.length) return;
+    const g = new Map(); all.forEach((a) => { const s = st.get(a.id), t = bucket(g, s.code); t.profit += s.profit; if (!a.archived && !c.archived) t.principal += s.principal; });
+    const gl = [...g.keys()].sort().filter((k) => g.get(k).principal || Math.abs(g.get(k).profit) >= 0.005).map((k) => { const t = g.get(k); return `<div>${esc(afmt(k, t.principal))} · <b class="${plCls(t.profit)}">${esc(asg(k, t.profit) || afmt(k, 0))}</b></div>`; }).join("");
+    const open = !!ui.propOpen[view + c.id], act = view === "active" ? (c.archived ? "" : `<button type="button" class="swipe-btn copy" data-action="cat-archive" data-id="${esc(c.id)}">Archive</button>`) : (c.archived ? `<button type="button" class="swipe-btn edit" data-action="cat-restore" data-id="${esc(c.id)}">Restore</button>` : "");
+    const head = `<div class="swipe-container"><div class="swipe-actions">${act}</div><div class="swipe-content group-head" data-action="prop-toggle" data-id="${esc(c.id)}"><div class="a-main"><span class="a-title">${esc(c.icon)} ${esc(c.name)}</span></div><div class="a-side-inline">${gl ? `<div class="gh-cap">Principal · Profit</div>${gl}` : ""}</div><span class="chev">${open ? "⌄" : "›"}</span></div></div>`;
+    const body = open ? rows.map((a) => { const s = st.get(a.id), p = s.profit;
+      const btns = view === "active" ? `<button type="button" class="swipe-btn edit" data-action="asset-edit-row" data-id="${esc(a.id)}">Edit</button><button type="button" class="swipe-btn copy" data-action="asset-archive" data-id="${esc(a.id)}">Archive</button>` : `<button type="button" class="swipe-btn edit" data-action="asset-restore" data-id="${esc(a.id)}">Restore</button><button type="button" class="swipe-btn delete" data-action="asset-delete-row" data-id="${esc(a.id)}">Delete</button>`;
+      return `<div class="swipe-container"><div class="swipe-actions">${btns}</div><div class="swipe-content asset-row" data-action="open-asset" data-id="${esc(a.id)}"><span class="record-icon" style="background:#F59E0B33">${esc(a.icon)}</span><div class="a-main"><div class="a-title">${esc(a.name)}</div><div class="a-grid"><span>Invest</span><span>${esc(afmt(s.code, s.inn))}</span><span>Principal</span><span>${esc(afmt(s.code, s.principal))}</span></div></div><div class="a-side a-side-col"><small class="cur-chip">${esc(s.code)}</small><b class="${plCls(p)}">${esc(asg(s.code, p) || afmt(s.code, 0))}</b></div></div></div>`; }).join("") : "";
+    out.push(`<div class="panel prop-group">${head}${body}</div>`);
+  });
+  $("propList").innerHTML = out.join("") || `<div class="empty-state">${view === "active" ? "No assets yet. Tap ＋ Asset to add one." : "Nothing archived"}</div>`;
+}
+const AR_KIND = { in: "INVEST", out: "WITHDRAW", loss: "LOSS" };
+function renderAssetPage() {
+  const a = state.assets.find((x) => x.id === ui.assetId); if (!a) return;
+  const s = assetStats(a), c = s.code; $("assetTitle").textContent = `${a.icon} ${a.name}`; setSeg("assetFilterSeg", "filter", ui.assetFilter);
+  $("assetKpi").innerHTML = `<div class="kpi"><span class="kpi-label">Invested</span><b>${esc(afmt(c, s.inn))}</b></div><div class="kpi"><span class="kpi-label">Principal</span><b>${esc(afmt(c, s.principal))}</b></div><div class="kpi"><span class="kpi-label">Profit</span><b class="${plCls(s.profit)}">${esc(asg(c, s.profit) || afmt(c, 0))}</b></div>`;
+  const list = s.recs.filter((x) => ui.assetFilter === "all" || x.kind === ui.assetFilter).reverse();
+  $("assetRecList").innerHTML = list.map((x) => { const sign = x.kind === "out" ? "+" : x.kind === "loss" ? "−" : "", part = x.kind === "out" ? (x.part === "profit" ? "Profit" : "Principal") : "";
+    const btns = `<button type="button" class="swipe-btn edit" data-action="asset-rec-edit" data-id="${esc(x.id)}">Edit</button><button type="button" class="swipe-btn delete" data-action="asset-rec-delete" data-id="${esc(x.id)}">Delete</button>`;
+    return `<div class="swipe-container"><div class="swipe-actions">${btns}</div><div class="swipe-content asset-row" data-action="asset-rec-edit" data-id="${esc(x.id)}"><span class="ar-tag ${x.kind}">${AR_KIND[x.kind]}</span><div class="a-main"><div class="a-title">${esc(x.note || (x.kind === "in" ? "Invest" : x.kind === "out" ? "Withdraw" : "Loss"))}</div><div class="a-sub">${esc(fmtDate(x.date))} ${esc(fmtTime(x.time))}</div></div><div class="a-side"><b class="ar-amt ${x.kind}">${sign}${esc(afmt(c, x.amount))}</b>${part ? `<span class="record-tag">${part}</span>` : ""}</div></div></div>`; }).join("") || `<div class="empty-state">No records yet</div>`;
+}
+/* Property record entry reuses the Ledger calculator form (fm.mode === "asset"); currency is fixed by the asset. */
+function principalLeft(assetId) { const a = state.assets.find((x) => x.id === assetId); return a ? assetStats(a).principal : 0; }
+function openAssetForm(o = {}) {
+  const ex = o.id ? state.assetRecords.find((x) => x.id === o.id) || null : null;
+  const live = state.assets.filter((a) => !a.archived && !assetCat(a).archived).sort((a, b) => a.order - b.order);
+  const assetId = ex ? ex.assetId : (o.assetId && state.assets.some((a) => a.id === o.assetId) ? o.assetId : live[0] && live[0].id);
+  if (!assetId) return toast("Add an asset first.");
+  Object.assign(fm, { catOpen: false, mode: "asset", ex, type: "expense", reimb: false, currency: acode(state.assets.find((a) => a.id === assetId)), catId: null, subId: "", legacy: "", photo: "", refundOf: null, date: ex ? ex.date : todayStr(), time: ex ? ex.time : nowTime(), panel: ex && ex.note ? "note" : "", typeLocked: false,
+    rep: { on: false, kind: "recurring", interval: 1, freq: "monthly", total: "", end: "" }, kind: ex ? ex.kind : "in", part: ex && ex.part ? ex.part : "principal", assetId });
+  $("formNote").value = ex ? ex.note : ""; $("formName").value = ""; $("formTitle").textContent = ex ? "Edit Property Record" : "Add Property Record";
+  $("opPM").textContent = "+/−"; $("opMD").textContent = "×/÷"; $("formError").classList.add("hidden"); calcReset(ex ? ex.amount : 0); renderForm(); openDlg("formDialog");
+}
+function assetFormSync() {
+  $("formTypeSeg").innerHTML = '<button type="button" class="segment" data-type="in">Invest</button><button type="button" class="segment" data-type="out">Withdraw</button><button type="button" class="segment" data-type="loss">Loss</button>';
+  setSeg("formTypeSeg", "type", fm.kind); $("formTypeSeg").classList.remove("locked");
+  $("formPartSeg").classList.toggle("hidden", fm.kind !== "out"); setSeg("formPartSeg", "part", fm.part);
+  const a = state.assets.find((x) => x.id === fm.assetId); $("formCatBtn").innerHTML = a ? `<span>${esc(a.icon)}</span><span>${esc(a.name)}</span>` : "Choose asset"; $("formCatBtn").disabled = !!fm.ex;
+  $("currencyBtn").disabled = true; $("formSubs").innerHTML = ""; $("formNameRow").classList.add("hidden");
+}
+function pickAsset() {
+  const live = state.assets.filter((a) => !a.archived && !assetCat(a).archived).sort((a, b) => a.order - b.order);
+  showSheet("Choose asset", live.map((a) => ({ label: `${a.icon} ${a.name} · ${acode(a)}`, run: () => { fm.assetId = a.id; fm.currency = acode(a); if (fm.kind === "out" && !fm.ex) fm.part = principalLeft(a.id) > 0 ? "principal" : "profit"; renderForm(); } })));
+}
+function saveAssetRec() {
+  const amount = round2(calcValue()), ex = fm.ex, a = state.assets.find((x) => x.id === fm.assetId);
+  if (!a) return formErr("Choose an asset."); if (!(amount > 0)) return formErr("Enter an amount greater than 0."); if (!isYMD(fm.date)) return formErr("Choose a date.");
+  const code = acode(a), rec = { ...(ex || {}), id: ex ? ex.id : makeId("ar"), assetId: a.id, kind: fm.kind, amount, currencyCode: code, currencySymbol: symOf(code), exchangeRate: null, baseAmount: null, date: fm.date, time: fm.time || "00:00", note: $("formNote").value.trim().slice(0, 120) };
+  if (fm.kind === "out") rec.part = fm.part; else delete rec.part;
+  delete rec.rateEst;
+  if (!commit(() => { if (ex) state.assetRecords[state.assetRecords.findIndex((x) => x.id === ex.id)] = rec; else state.assetRecords.push(rec); })) return;
+  ui.assetId = a.id; closeDlg("formDialog"); renderAll(); toast(ex ? "Record updated" : "Record saved");
+}
+const asForm = { id: null };
+function setAssetIcon(ic) { $("asIcon").value = ic; $("asIconBtn").textContent = ic; }
+function openAssetEdit(id) {
+  const ex = id ? state.assets.find((a) => a.id === id) : null; asForm.id = ex ? ex.id : null;
+  $("asCat").innerHTML = state.assetCats.filter((c) => !c.archived || (ex && assetCat(ex).id === c.id)).map((c) => `<option value="${esc(c.id)}">${esc(c.icon + " " + c.name)}</option>`).join("");
+  $("asCat").value = ex ? assetCat(ex).id : state.assetCats.find((c) => !c.archived)?.id || state.assetCats[0].id;
+  const codes = state.currencies.map((c) => c.code); const cur = ex ? acode(ex) : (codes.includes("USD") ? "USD" : dispCode()); if (!codes.includes(cur)) codes.push(cur);
+  $("asCur").innerHTML = codes.map((c) => `<option value="${esc(c)}">${esc(c)}${curOf(c) && curOf(c).name ? " · " + esc(curOf(c).name) : ""}</option>`).join(""); $("asCur").value = cur;
+  $("asName").value = ex ? ex.name : ""; setAssetIcon(ex ? ex.icon : "💼"); $("asError").textContent = ""; $("assetDialogTitle").textContent = ex ? "Edit Asset" : "New Asset"; $("asDelete").classList.toggle("hidden", !ex); openDlg("assetDialog");
+}
+function pickAssetIcon() { showSheet("Choose icon", ASSET_ICONS.map(([ic, n]) => ({ label: `${ic} ${n}`, run: () => setAssetIcon(ic) }))); }
+function saveAsset() {
+  const name = $("asName").value.trim().slice(0, 30), icon = ($("asIcon").value.trim() || "💼").slice(0, 4), catId = $("asCat").value, cur = $("asCur").value;
+  if (!name) { $("asError").textContent = "Enter a name."; return; }
+  const ok = commit(() => {
+    if (asForm.id) { const a = state.assets.find((x) => x.id === asForm.id); if (a) { a.name = name; a.icon = icon; a.catId = catId;
+      if (acode(a) !== cur) { a.currency = cur; state.assetRecords.forEach((x) => { if (x.assetId === a.id) { x.currencyCode = cur; x.currencySymbol = symOf(cur); x.exchangeRate = null; x.baseAmount = null; } }); } else a.currency = cur; } }
+    else { const a = { id: makeId("as"), name, icon, catId, currency: cur, order: state.assets.length, archived: false }; state.assets.push(a); ui.assetId = a.id; ui.propOpen["active" + catId] = true; }
+  });
+  if (ok) { closeDlg("assetDialog"); renderAll(); }
+}
+function deleteAsset(id) {
+  const a = state.assets.find((x) => x.id === id); if (!a) return; const n = state.assetRecords.filter((x) => x.assetId === a.id).length;
+  confirmSheet(`Delete "${a.name}" and its ${n} record(s)? This cannot be undone.`, "Delete", () => { commit(() => { state.assets = state.assets.filter((x) => x.id !== a.id); state.assetRecords = state.assetRecords.filter((x) => x.assetId !== a.id); }); closeDlg("assetDialog"); if (ui.pages.includes("asset") && ui.assetId === a.id) goBack(); renderAll(); });
+}
+
 /* ===== Page navigation ===== */
 function setTab(t) {
   ui.tab = t; closeSwipes();
@@ -883,6 +1009,11 @@ function openForm(o = {}) {
   calcReset(amt > 0 ? amt : 0); renderForm(); openDlg("formDialog");
 }
 function renderForm() {
+  if (fm.mode === "asset") {
+    assetFormSync(); ["toolPhoto", "toolRepeat"].forEach((i) => $(i).classList.add("hidden")); $("toolDate").classList.remove("hidden"); $("toolNote").classList.toggle("on", !!$("formNote").value.trim());
+    $("toolInfo").textContent = `${fmtDate(fm.date)} ${fmtTime(fm.time)}`; $("notePanel").classList.toggle("hidden", fm.panel !== "note"); $("photoPanel").classList.add("hidden"); $("repeatPanel").classList.add("hidden"); return updateNumpad();
+  }
+  $("formPartSeg").classList.add("hidden"); $("currencyBtn").disabled = false;
   const isRec = fm.mode === "record", isTpl = fm.mode === "template", isRule = fm.mode === "rule", rp = fm.rep, ex = fm.ex;
   $("formNameRow").classList.toggle("hidden", !isTpl); const pbMode = isRec && (!!fm.refundOf || !!(ex && ex.isRefund));
   $("formTypeSeg").innerHTML = pbMode ? '<button type="button" class="segment" data-type="refund">Refund</button><button type="button" class="segment" data-type="reimb">Reimburse</button>' : '<button type="button" class="segment" data-type="expense">Expense</button><button type="button" class="segment" data-type="income">Income</button>';
@@ -921,6 +1052,7 @@ function subFields(cat, ex) {
   return { tag, tagId, snap };
 }
 function saveForm() {
+  if (fm.mode === "asset") return saveAssetRec();
   const amount = round2(calcValue()), cat = catOf(fm.catId);
   if (fm.mode === "template") return saveTemplateForm(amount, cat);
   if (!(amount > 0)) return formErr("Enter an amount greater than 0.");
@@ -1009,7 +1141,9 @@ function openDetail(id) {
   let h = `<div class="group inset">${row("Amount", isHiddenInc(r) ? MASK : (r.type === "income" && !r.isRefund ? "+" : "−") + fmtRec(r))}${r.currencyCode !== BASE && r.currencyCode !== GEN && !isHiddenInc(r) ? row("In SGD", b === null ? "Rate unavailable" : symOf(BASE) + fmtNum(b)) : ""}${r.currencyCode === GEN ? row("Totals", "Not counted (generic currency)") : ""}` +
     row("Type", r.isReimb ? "Reimbursement" : r.isRefund ? "Refund" : r.type === "income" ? "Income" : "Expense") + row("Category", r.categoryNameSnapshot + (cat && cat.name !== r.categoryNameSnapshot ? ` (now ${cat.name})` : "")) +
     (r.tagNameSnapshot ? row("Subcategory", r.tagNameSnapshot) : "") + row("Date", fmtDate(r.date) + " " + fmtTime(r.time)) + (r.note ? row("Note", r.note) : "") +
-    (bd && !r.isRefund ? row("Repeat", bd.t) : "") + (orig ? row(r.isReimb ? "Reimbursed" : "Refund of", fmtRec(orig) + " · " + fmtDate(orig.date)) : "") + (rf.length ? row("Refunded", symOf(r.currencyCode) + fmtNum(rf.reduce((s, x) => s + x.amount, 0))) : "") + `</div>`;
+    (bd && !r.isRefund ? row("Repeat", bd.t) : "") + (rf.length ? row("Refunded", symOf(r.currencyCode) + fmtNum(rf.reduce((s, x) => s + x.amount, 0))) : "") + `</div>`;
+  const link = (l, x) => `<button type="button" class="row" data-action="rec-open" data-id="${esc(x.id)}"><span class="row-label">${esc(l)}</span><span class="row-value">${esc(fmtRec(x) + " · " + fmtDate(x.date))} ›</span></button>`;
+  if (orig || rf.length) h += `<div class="group inset">${orig ? link(r.isReimb ? "Reimbursed (view original)" : "Refund of (view original)", orig) : ""}${rf.map((x) => link(x.isReimb ? "Reimbursement" : "Refund", x)).join("")}</div>`;
   if (r.photo && r.photo.startsWith("data:image/")) h += `<div class="form-field"><img src="${esc(r.photo)}" alt="Attachment" style="max-width:100%;border-radius:10px"></div>`;
   h += `<div class="dialog-actions" style="flex-wrap:wrap"><button type="button" class="button button-secondary" data-action="rec-edit" data-id="${esc(r.id)}">Edit</button>` +
     (r.type === "expense" && !r.isRefund ? `<button type="button" class="button button-secondary" data-action="rec-refund" data-id="${esc(r.id)}">Payback</button>` : "") +
@@ -1228,6 +1362,16 @@ const A = {
   "toggle-accordion": (el) => { const a = el.closest(".accordion"), was = a.classList.contains("open"); a.classList.toggle("open", !was); el.setAttribute("aria-expanded", String(!was)); },
   "toggle-swatches": (el) => { const g = $(el.dataset.target); g.classList.toggle("hidden"); el.setAttribute("aria-expanded", String(!g.classList.contains("hidden"))); },
   "open-page": (el) => openPage(el.dataset.page),
+  "goto-settings": () => setTab("settings"), "asset-add": () => openAssetEdit(null), "open-asset": (el) => { ui.assetId = el.dataset.id; ui.assetFilter = "all"; showPage("asset"); renderAll(); },
+  "asset-edit": () => openAssetEdit(ui.assetId), "asset-edit-row": (el) => { closeSwipes(); openAssetEdit(el.dataset.id); }, "asset-save": () => saveAsset(),
+  "asset-delete": () => deleteAsset(asForm.id), "asset-delete-row": (el) => { closeSwipes(); deleteAsset(el.dataset.id); },
+  "asset-archive": (el) => { closeSwipes(); commit(() => { const a = state.assets.find((x) => x.id === el.dataset.id); if (a) a.archived = true; }); renderAll(); toast("Archived"); },
+  "as-icon-pick": () => pickAssetIcon(), "asset-restore": (el) => { closeSwipes(); commit(() => { const a = state.assets.find((x) => x.id === el.dataset.id); if (a) { a.archived = false; assetCat(a).archived = false; } }); renderAll(); toast("Restored"); },
+  "cat-archive": (el) => { closeSwipes(); commit(() => { const c = state.assetCats.find((x) => x.id === el.dataset.id); if (c) c.archived = true; }); renderAll(); toast("Archived"); },
+  "cat-restore": (el) => { closeSwipes(); commit(() => { const c = state.assetCats.find((x) => x.id === el.dataset.id); if (c) c.archived = false; }); renderAll(); toast("Restored"); },
+  "prop-toggle": (el) => { const k = ui.propView + el.dataset.id; ui.propOpen[k] = !ui.propOpen[k]; renderProperty(); },
+  "asset-rec-add": () => openAssetForm({ assetId: ui.assetId }), "asset-rec-edit": (el) => { closeSwipes(); openAssetForm({ id: el.dataset.id }); },
+  "asset-rec-delete": (el) => { closeSwipes(); const id = el.dataset.id; confirmSheet("Delete this record?", "Delete", () => { commit(() => { state.assetRecords = state.assetRecords.filter((x) => x.id !== id); }); renderAll(); }); },
   "backup": async () => { const name = `my-ledger-backup-${todayStr()}.json`, text = backupJSON();
     try { const f = new File([text], name, { type: "application/json" }); if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: "My Ledger backup" }); markBackup(); return; } } catch (e) { if (e && e.name === "AbortError") return; }
     download(name, text, "application/json"); markBackup(); },
@@ -1241,6 +1385,7 @@ const A = {
   "add-record": () => openForm({}), "back": () => goBack(), "close-dialog": (el) => { const d = el.closest("dialog"); if (d) d.close(); },
   "sheet-close": () => closeSheet(),
   "pick-currency": () => {
+    if (fm.mode === "asset") return;
     $("currencyPickerList").innerHTML = !state.currencies.length ? `<p class="row-hint">No currencies. Add one in Settings → Currencies.</p>` : state.currencies.map((c) => `<button type="button" class="row" data-action="select-currency" data-code="${esc(c.code)}"><span class="row-icon" style="background:var(--surface-soft)">${esc(c.symbol)}</span><span class="row-label">${esc(c.code)}<small>${esc(c.name)}</small></span>${c.code === fm.currency ? "✓" : ""}</button>`).join("");
     openDlg("currencyPickerDialog");
   },
@@ -1259,6 +1404,7 @@ const A = {
   "scope-choice": (el) => applyRuleScope(el.dataset.scope),
   "open-detail": (el) => { const c = el.closest(".swipe-content"); if (c && c.classList.contains("open")) closeSwipes(); else openDetail(recId(el)); },
   "rec-edit": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ id: recId(el) }); },
+  "rec-open": (el) => openDetail(el.dataset.id),
   "rec-refund": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ refundOf: recId(el) }); },
   "rec-copy": (el) => { closeDlg("detailDialog"); closeSwipes(); openForm({ copyOf: recId(el) }); },
   "rec-delete": (el) => { closeDlg("detailDialog"); closeSwipes(); deleteRecord(recId(el)); },
@@ -1279,7 +1425,7 @@ const A = {
   "rule-archive": (el) => confirmSheet("Archive this rule? Records already generated stay untouched.", "Archive", () => { commit(() => { const r = state.recurringRules.find((x) => x.id === recId(el)); r.archived = true; r.active = false; r.pausedRanges.push({ from: todayStr(), to: null }); }); renderAll(); }),
   "rule-restore": (el) => { const id = recId(el); closeSwipes(); openDatePicker({ value: todayStr(), title: "Resume from", onSelect: (d) => { commit(() => { const r = state.recurringRules.find((x) => x.id === id); const open = r.pausedRanges.filter((p) => !p.to).pop(); if (open) open.to = d; r.archived = false; r.active = true; }); runReconcile(); renderAll(); toast("Rule resumed"); } }); },
   "rule-delete": (el) => confirmSheet("Delete this rule? Records already generated are kept.", "Delete", () => { commit(() => { state.recurringRules = state.recurringRules.filter((r) => r.id !== recId(el)); }); renderAll(); }),
-  "form-cat-pick": () => { const cats = sortedCats(fm.type), cur = catOf(fm.catId); const list = cur && !cats.includes(cur) ? [cur].concat(cats) : cats;
+  "form-cat-pick": () => { if (fm.mode === "asset") return pickAsset(); const cats = sortedCats(fm.type), cur = catOf(fm.catId); const list = cur && !cats.includes(cur) ? [cur].concat(cats) : cats;
     $("catPickGrid").innerHTML = list.map((c) => `<button type="button" class="chip cat-chip${c.id === fm.catId ? " active" : ""}" data-action="form-cat-select" data-cat="${esc(c.id)}"><span>${esc(c.icon)}</span><span>${esc(c.name)}</span></button>`).join("") || `<span class="muted">No ${fm.type} categories.</span>`; openDlg("catPickDialog"); },
   "form-cat-select": (el) => { fm.catId = el.dataset.cat; fm.subId = ""; fm.legacy = ""; closeDlg("catPickDialog"); renderForm(); },
   "cloud-restore": async () => { if (!cloud.col) return toast("Cloud copy is not available here."); const c = await cloudPull().catch(() => null); if (!c) return toast("No cloud copy yet.");
@@ -1313,10 +1459,12 @@ const segHandlers = {
   viewSeg: (s) => { ui.view = s.dataset.view; renderDetails(); },
   homeScope: (s) => { ui.homeScope = s.dataset.scope; renderHome(); },
   statsScope: (s) => { ui.statsScope = s.dataset.scope; renderStats(); },
-  formTypeSeg: (s) => { if (fm.mode === "record" && (fm.refundOf || (fm.ex && fm.ex.isRefund))) { fm.reimb = s.dataset.type === "reimb"; return renderForm(); } if (fm.typeLocked) return; fm.type = s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
+  formTypeSeg: (s) => { if (fm.mode === "asset") { fm.kind = s.dataset.type; if (fm.kind === "out" && !fm.ex) fm.part = principalLeft(fm.assetId) > 0 ? "principal" : "profit"; return renderForm(); } if (fm.mode === "record" && (fm.refundOf || (fm.ex && fm.ex.isRefund))) { fm.reimb = s.dataset.type === "reimb"; return renderForm(); } if (fm.typeLocked) return; fm.type = s.dataset.type; const c = catOf(fm.catId); if (!c || c.kind !== fm.type) { fm.catId = sortedCats(fm.type)[0]?.id || null; fm.subId = ""; fm.legacy = ""; } renderForm(); },
   repeatKind: (s) => { if ($("repeatKind").classList.contains("locked")) return; fm.rep.kind = s.dataset.kind; renderForm(); },
   catKindSeg: (s) => { if (catDraft) { catDraft.kind = s.dataset.kind; renderCategoryEdit(); } },
   categoriesSegment: (s) => { ui.catFilter = s.dataset.filter; renderCategoriesPage(); },
+  propViewSeg: (s) => { ui.propView = s.dataset.view; renderProperty(); }, assetFilterSeg: (s) => { ui.assetFilter = s.dataset.filter; renderAssetPage(); },
+  formPartSeg: (s) => { fm.part = s.dataset.part; renderForm(); },
   recurringSegment: (s) => { ui.ruleFilter = s.dataset.filter; renderRecurringPage(); }
 };
 function onClick(e) {
@@ -1353,7 +1501,7 @@ function wire() {
   document.addEventListener("click", onClick);
   document.addEventListener("pointerdown", (e) => { if ($("ctxRoot").firstChild && !e.target.closest(".ctx-menu")) closeCtx(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeCtx(); closeSheet(); } });
-  enableSwipe($("recordList")); enableSwipe($("recurringList")); enableSwipe($("currencyList")); enableSwipe($("templateList"));
+  enableSwipe($("recordList")); enableSwipe($("recurringList")); enableSwipe($("currencyList")); enableSwipe($("templateList")); enableSwipe($("propList")); enableSwipe($("assetRecList"));
   makeSortable($("currencyList"), ".swipe-container", ".row-handle", (ids) => { commit(() => { const m = new Map(state.currencies.map((c) => [c.id, c])); state.currencies = ids.map((i) => m.get(i)).filter(Boolean).concat(state.currencies.filter((c) => !ids.includes(c.id))); }); renderAll(); });
   makeSortable($("templateList"), ".swipe-container", ".row-handle", (ids) => { commit(() => { const m = new Map(state.quickTemplates.map((t) => [t.id, t])); state.quickTemplates = ids.map((i) => m.get(i)).filter(Boolean).concat(state.quickTemplates.filter((t) => !ids.includes(t.id))); }); renderAll(); });
   makeSortable($("categoriesList"), ".row[data-id]", ".row-handle", (ids) => { commit(() => applyOrder(state.categories, ids)); renderAll(); });

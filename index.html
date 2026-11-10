@@ -44,7 +44,7 @@
         <img class="avatar" id="avatarImg" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="><span class="avatar-fallback" id="avatarFallback">A</span>
         <span class="profile-name" id="profileName">Rek</span>
       </button>
-      <button type="button" class="head-done hidden" id="homeEditDoneBtn" data-action="home-edit-done">Done</button>
+      <button type="button" class="icon-button gear-btn" data-action="goto-settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button><button type="button" class="head-done hidden" id="homeEditDoneBtn" data-action="home-edit-done">Done</button>
     </div>
 
     <div class="period-bar">
@@ -147,6 +147,15 @@
   </section>
 
   <!-- ===== SETTINGS (flat Layer 1; Appearance expands to Layer 2 → swatches Layer 3) ===== -->
+  <!-- ===== PROPERTY ===== -->
+  <section id="page-property" class="page" aria-label="Property">
+    <div class="page-head page-head-row"><h1>Property</h1><button type="button" class="nav-action" data-action="asset-add">＋ Asset</button></div>
+    <div class="kpi-row kpi-prop" id="propKpi"></div>
+    <div class="segmented" id="propViewSeg"><button type="button" class="segment active" data-view="active">Active</button><button type="button" class="segment" data-view="archived">Archived</button></div>
+    <div id="propList"></div>
+    <p class="row-hint">Principal = Invest − Withdraw (principal) − Loss. Profit = Withdraw (profit) − Loss. Archived assets still count in Profit.</p>
+  </section>
+
   <section id="page-settings" class="page" aria-label="Settings">
     <div class="page-head"><h1>Settings</h1></div>
 
@@ -206,7 +215,7 @@
   <button type="button" class="tab-item" data-tab="details" aria-label="Details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Details</span></button>
   <div class="tab-fab-slot"><button type="button" class="tab-fab" data-action="add-record" aria-label="Add record"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div>
   <button type="button" class="tab-item" data-tab="stats" aria-label="Stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V10M12 20V4M19 20v-7"/></svg><span>Stats</span></button>
-  <button type="button" class="tab-item" data-tab="settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg><span>Settings</span></button>
+  <button type="button" class="tab-item" data-tab="property" aria-label="Property"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg><span>Property</span></button>
 </nav>
 
 <!-- ===== PUSH SUB-PAGES ===== -->
@@ -271,6 +280,14 @@
   <div class="sub-content"><p class="swipe-hint">Swipe left to set default or delete. Drag ≡ to reorder.</p><div class="record-list" id="currencyList"></div><p class="row-hint" id="ratesInfo"></p></div>
 </section>
 
+<section id="sub-asset" class="sub-page hidden" aria-label="Asset">
+  <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title" id="assetTitle">Asset</span><button type="button" class="nav-action" data-action="asset-rec-add">＋ Add</button></div>
+  <div class="sub-content"><div class="kpi-row kpi-prop" id="assetKpi"></div>
+    <div class="segmented" id="assetFilterSeg"><button type="button" class="segment active" data-filter="all">All</button><button type="button" class="segment" data-filter="in">Invest</button><button type="button" class="segment" data-filter="out">Withdraw</button><button type="button" class="segment" data-filter="loss">Loss</button></div>
+    <div id="assetRecList"></div>
+    <div class="group"><button type="button" class="row" data-action="asset-edit"><span class="row-label">Edit asset</span><span class="chev">›</span></button></div></div>
+</section>
+
 <section id="sub-templates" class="sub-page hidden" aria-label="Quick Templates">
   <div class="nav-bar"><button type="button" class="nav-back" data-action="back">‹ Back</button><span class="nav-title">Quick Templates</span><button type="button" class="nav-action" data-action="add-template">＋ New</button></div>
   <div class="sub-content"><p class="swipe-hint">Swipe left to edit or delete. Drag ≡ to reorder.</p><div class="record-list" id="templateList"></div></div>
@@ -288,6 +305,7 @@
     <div class="dialog-body">
       <div class="form-pad hidden" id="formNameRow"><input type="text" class="text-input" id="formName" maxlength="20" placeholder="Template name" aria-label="Template name"></div>
       <div class="segmented form-pad" id="formTypeSeg"><button type="button" class="segment active" data-type="expense">Expense</button><button type="button" class="segment" data-type="income">Income</button></div>
+      <div class="segmented form-pad hidden" id="formPartSeg"><button type="button" class="segment active" data-part="principal">Principal</button><button type="button" class="segment" data-part="profit">Profit</button></div>
       <div class="numpad-display"><div class="numpad-expression" id="numpadExpression"></div><div class="numpad-amount" id="numpadAmount">0</div><div class="conversion-hint" id="conversionHint"></div></div>
 
       <div class="tool-row">
@@ -377,6 +395,19 @@
     <div class="group inset" id="curAddList"></div>
   </div>
 </dialog>
+
+<dialog id="assetDialog" class="app-dialog">
+  <div class="dialog-header"><h2 id="assetDialogTitle">New Asset</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
+  <div class="dialog-body">
+    <div class="form-pad"><select class="text-input" id="asCat" aria-label="Category"></select></div>
+    <div class="form-pad"><input type="text" class="text-input" id="asName" maxlength="30" placeholder="Asset name (e.g. Gold, Stocks)" aria-label="Asset name"></div>
+    <div class="form-pad"><button type="button" class="text-input as-icon-btn" id="asIconBtn" data-action="as-icon-pick" aria-label="Choose icon">💼</button><input type="hidden" id="asIcon"></div>
+    <div class="form-pad"><select class="text-input" id="asCur" aria-label="Currency"></select><p class="row-hint">Currency of this asset. Changing it relabels existing records (amounts are not converted).</p></div>
+    <p class="form-error" id="asError"></p>
+  </div>
+  <div class="dialog-actions"><button type="button" class="button button-danger hidden" id="asDelete" data-action="asset-delete">Delete</button><button type="button" class="button button-primary" data-action="asset-save">Save</button></div>
+</dialog>
+
 
 <dialog id="scopeDialog" class="app-dialog">
   <div class="dialog-header"><h2>Apply Changes To</h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="Close">✕</button></div>
